@@ -1,12 +1,27 @@
-"""リアルタイムグラフ（仕様 F-03・7.1）。上：電流 mA、下：電圧 V。横軸は共通。"""
+"""リアルタイムグラフ（仕様 F-03・7.1）。
+
+表示モードは 2 つ：
+  - 2 段（split）  ：上に電流 mA、下に電圧 V。横軸は共通
+  - まとめて（combined）：1 つのグラフに、左軸 電圧 V・右軸 電流 mA
+縦軸の下端は 0（値がマイナスのときだけ下に広げる）。
+"""
 
 from __future__ import annotations
 
 import pyqtgraph as pg
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtCore import QTimer, Signal
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
-from ..decimate import minmax_decimate, visible_slice
+from ..decimate import minmax_decimate, visible_slice, zero_based_range
 from ..measurement import MeasurementData
 from ..theme import COLORS, CURRENT_LINE_WIDTH, VOLTAGE_LINE_WIDTH, mono_font, ui_font
 
@@ -14,6 +29,11 @@ RANGES = [("10秒", 10.0), ("60秒", 60.0), ("300秒", 300.0), ("全体", None)]
 DEFAULT_RANGE = 60.0
 MAX_DRAW_POINTS = 4000
 LEFT_AXIS_WIDTH = 52
+ZERO_LABEL_MARGIN = 0.06  # 下端 0 の目盛りを見せるための余白（縦軸の幅に対する割合）
+
+MODE_SPLIT = "split"
+MODE_COMBINED = "combined"
+MODES = [("2段", MODE_SPLIT), ("重ねる", MODE_COMBINED)]
 
 
 class SecondsAxis(pg.AxisItem):
@@ -26,6 +46,13 @@ class SecondsAxis(pg.AxisItem):
         return strs
 
 
+def _style_axis(ax: pg.AxisItem, text_color: str) -> None:
+    ax.setPen(pg.mkPen(COLORS["graph_grid"]))
+    ax.setTextPen(pg.mkPen(text_color))
+    ax.setStyle(tickFont=mono_font(11), tickLength=0, maxTickLevel=0)  # 主目盛りだけ
+    ax.setTickDensity(0.6)
+
+
 def _make_plot(bottom_axis: pg.AxisItem | None = None) -> pg.PlotWidget:
     axis_items = {"bottom": bottom_axis} if bottom_axis is not None else None
     pw = pg.PlotWidget(background=COLORS["panel_bg"], axisItems=axis_items)
@@ -36,19 +63,52 @@ def _make_plot(bottom_axis: pg.AxisItem | None = None) -> pg.PlotWidget:
     vb = pi.getViewBox()
     vb.setBackgroundColor(COLORS["graph_bg"])
     vb.setBorder(pg.mkPen(COLORS["graph_grid"]))
-    tick_font = mono_font(11)
     for name in ("left", "bottom"):
-        ax = pi.getAxis(name)
-        ax.setPen(pg.mkPen(COLORS["graph_grid"]))
-        ax.setTextPen(pg.mkPen(COLORS["graph_axis"]))
-        ax.setStyle(tickFont=tick_font, tickLength=0, maxTickLevel=0)  # 主目盛りだけ
-        ax.setTickDensity(0.6)
+        _style_axis(pi.getAxis(name), COLORS["graph_axis"])
     pi.getAxis("left").setWidth(LEFT_AXIS_WIDTH)
     pi.showGrid(x=False, y=True, alpha=1.0)  # モックに合わせて横線だけ
     return pw
 
 
+def _screen_y_range(y) -> tuple[float, float]:
+    """縦軸の下端は 0（マイナスがあるときだけ下に広げる）。
+
+    pyqtgraph は目盛線を出していると軸の端ちょうどの数値を描かないので、
+    下端が 0 のときは少しだけ下に余白を取り、「0」の目盛りが見えるようにする。
+    """
+    lo, hi = zero_based_range(y)
+    if lo == 0.0:
+        lo = -(hi - lo) * ZERO_LABEL_MARGIN
+    return lo, hi
+
+
+def _segmented(items, font_px: int = 13) -> tuple[QFrame, QButtonGroup, list[QPushButton]]:
+    """ひとつながりの切り替えボタン（選択中は濃いオレンジ）。"""
+    group = QFrame()
+    group.setObjectName("rangeGroup")
+    gl = QHBoxLayout(group)
+    gl.setContentsMargins(1, 1, 1, 1)
+    gl.setSpacing(0)
+    bg = QButtonGroup(group)
+    bg.setExclusive(True)
+    buttons = []
+    for i, label in enumerate(items):
+        b = QPushButton(label)
+        b.setCheckable(True)
+        b.setFont(ui_font(font_px))
+        if i == 0:
+            b.setProperty("pos", "first")
+        elif i == len(items) - 1:
+            b.setProperty("pos", "last")
+        bg.addButton(b)
+        gl.addWidget(b)
+        buttons.append(b)
+    return group, bg, buttons
+
+
 class PlotPanel(QFrame):
+    mode_changed = Signal(str)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("panel")
@@ -56,6 +116,7 @@ class PlotPanel(QFrame):
         self._data: MeasurementData | None = None
         self._live = False  # 測定中は表示範囲を自動で追従させる
         self._window: float | None = DEFAULT_RANGE
+        self._mode = MODE_SPLIT
         self._drawn_key = None
         self._setting_range = False
 
@@ -63,36 +124,37 @@ class PlotPanel(QFrame):
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(6)
 
+        # 1 行目：グラフ名（左）、表示モードと表示範囲の切り替え（右）
         top = QHBoxLayout()
-        cur_label = QLabel("電流 [mA]")
-        cur_label.setObjectName("currentAxisLabel")
-        cur_label.setFont(ui_font(12, bold=True))
-        top.addWidget(cur_label)
+        self.title_label = QLabel()
+        self.title_label.setObjectName("currentAxisLabel")
+        self.title_label.setFont(ui_font(12, bold=True))
+        top.addWidget(self.title_label)
         top.addStretch(1)
-        group = QFrame()
-        group.setObjectName("rangeGroup")
-        gl = QHBoxLayout(group)
-        gl.setContentsMargins(1, 1, 1, 1)
-        gl.setSpacing(0)
-        self._range_group = QButtonGroup(self)
-        self._range_group.setExclusive(True)
+        mode_group, _, mode_buttons = _segmented([label for label, _ in MODES])
+        self.mode_buttons: dict[str, QPushButton] = {}
+        for b, (_, mode) in zip(mode_buttons, MODES):
+            b.setToolTip("2段：上に電流・下に電圧／重ねる：左軸に電圧・右軸に電流")
+            b.clicked.connect(lambda _=False, m=mode: self.set_mode(m))
+            self.mode_buttons[mode] = b
+        top.addWidget(mode_group)
+        top.addSpacing(8)
+        range_group, _, range_buttons = _segmented([label for label, _ in RANGES])
         self.range_buttons: dict[float | None, QPushButton] = {}
-        for i, (label, sec) in enumerate(RANGES):
-            b = QPushButton(label)
-            b.setCheckable(True)
-            b.setChecked(sec == DEFAULT_RANGE)
-            b.setFont(ui_font(13))
-            if i == 0:
-                b.setProperty("pos", "first")
-            elif i == len(RANGES) - 1:
-                b.setProperty("pos", "last")
+        for b, (_, sec) in zip(range_buttons, RANGES):
             b.clicked.connect(lambda _=False, s=sec: self.set_window(s))
-            self._range_group.addButton(b)
             self.range_buttons[sec] = b
-            gl.addWidget(b)
-        top.addWidget(group)
+        top.addWidget(range_group)
         layout.addLayout(top)
 
+        self.stack = QStackedWidget()
+        layout.addWidget(self.stack, 1)
+
+        # ---- 2 段 ----
+        split = QWidget()
+        sl = QVBoxLayout(split)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(6)
         self.pw_cur = _make_plot()
         self.pw_vol = _make_plot(SecondsAxis("bottom"))
         self.p_cur = self.pw_cur.getPlotItem()
@@ -100,16 +162,34 @@ class PlotPanel(QFrame):
         self.p_cur.getAxis("bottom").setStyle(showValues=False)
         self.p_cur.getAxis("bottom").setHeight(1)
         self.p_vol.setXLink(self.p_cur)
-        layout.addWidget(self.pw_cur, 3)  # 電流グラフは電圧グラフの約 1.5 倍の高さ
-
+        sl.addWidget(self.pw_cur, 3)  # 電流グラフは電圧グラフの約 1.5 倍の高さ
         vol_label = QLabel("電圧 [V]")
         vol_label.setObjectName("voltageAxisLabel")
         vol_label.setFont(ui_font(12, bold=True))
-        layout.addWidget(vol_label)
-        layout.addWidget(self.pw_vol, 2)
-
+        sl.addWidget(vol_label)
+        sl.addWidget(self.pw_vol, 2)
+        self.stack.addWidget(split)
         self.c_cur = self.p_cur.plot(pen=pg.mkPen(COLORS["current_line"], width=CURRENT_LINE_WIDTH))
         self.c_vol = self.p_vol.plot(pen=pg.mkPen(COLORS["voltage_line"], width=VOLTAGE_LINE_WIDTH))
+
+        # ---- まとめて表示：左軸 電圧（PlotItem 本体）、右軸 電流（重ねた ViewBox） ----
+        self.pw_comb = _make_plot(SecondsAxis("bottom"))
+        self.p_comb = self.pw_comb.getPlotItem()
+        self.vb_comb_cur = pg.ViewBox()
+        self.p_comb.showAxis("right")
+        right = self.p_comb.getAxis("right")
+        _style_axis(right, COLORS["current_label"])
+        right.setWidth(LEFT_AXIS_WIDTH)
+        right.linkToView(self.vb_comb_cur)
+        self.p_comb.scene().addItem(self.vb_comb_cur)
+        # 電圧側（PlotItem 内の ViewBox）は背景色で塗りつぶすので、電流側を PlotItem ごと上に重ねる
+        self.vb_comb_cur.setZValue(self.p_comb.zValue() + 1)
+        self.vb_comb_cur.setXLink(self.p_comb)
+        self.p_comb.getViewBox().sigResized.connect(self._sync_comb_views)
+        self.c_comb_vol = self.p_comb.plot(pen=pg.mkPen(COLORS["voltage_line"], width=VOLTAGE_LINE_WIDTH))
+        self.c_comb_cur = pg.PlotCurveItem(pen=pg.mkPen(COLORS["current_line"], width=CURRENT_LINE_WIDTH))
+        self.vb_comb_cur.addItem(self.c_comb_cur)
+        self.stack.addWidget(self.pw_comb)
 
         # 停止後にユーザーが拡大・移動したら、見えている範囲を間引き直す
         self._redraw_timer = QTimer(self)
@@ -117,6 +197,10 @@ class PlotPanel(QFrame):
         self._redraw_timer.setInterval(40)
         self._redraw_timer.timeout.connect(self._redraw_view)
         self.p_cur.getViewBox().sigXRangeChanged.connect(self._on_x_range_changed)
+        self.p_comb.getViewBox().sigXRangeChanged.connect(self._on_x_range_changed)
+
+        self.range_buttons[DEFAULT_RANGE].setChecked(True)
+        self._apply_mode_widgets()
 
     # ---- 外部から ----
     def set_data(self, data: MeasurementData | None, live: bool) -> None:
@@ -138,12 +222,27 @@ class PlotPanel(QFrame):
     def window(self) -> float | None:
         return self._window
 
+    def set_mode(self, mode: str) -> None:
+        if mode not in (MODE_SPLIT, MODE_COMBINED):
+            mode = MODE_SPLIT
+        changed = mode != self._mode
+        self._mode = mode
+        self._apply_mode_widgets()
+        self._drawn_key = None
+        self.refresh()
+        if changed:
+            self.mode_changed.emit(mode)
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
     def refresh(self) -> None:
         """表示範囲の設定に従って描き直す（測定中は 200 ms ごとに呼ばれる）。"""
         d = self._data
         if d is None or d.count == 0:
-            self.c_cur.setData([], [])
-            self.c_vol.setData([], [])
+            for curve in (self.c_cur, self.c_vol, self.c_comb_cur, self.c_comb_vol):
+                curve.setData([], [])
             return
         t_last = d.last_elapsed_s
         if self._window is None:
@@ -151,19 +250,38 @@ class PlotPanel(QFrame):
         else:
             x1 = max(t_last, self._window)
             x0 = x1 - self._window
-        key = (d.count, x0, x1)
+        key = (self._mode, d.count, x0, x1)
         if key == self._drawn_key:
             return
-        for plot in (self.p_cur, self.p_vol):
-            plot.enableAutoRange(axis="y")
-            plot.setAutoVisible(y=True)
         self._setting_range = True
-        self.p_cur.setXRange(x0, x1, padding=0.0)
+        self._x_master().setXRange(x0, x1, padding=0.0)
         self._setting_range = False
         self._draw(x0, x1)
         self._drawn_key = key
 
     # ---- 内部 ----
+    def _x_master(self) -> pg.PlotItem:
+        return self.p_comb if self._mode == MODE_COMBINED else self.p_cur
+
+    def _apply_mode_widgets(self) -> None:
+        combined = self._mode == MODE_COMBINED
+        self.mode_buttons[self._mode].setChecked(True)
+        self.stack.setCurrentIndex(1 if combined else 0)
+        if combined:
+            vol, cur = COLORS["voltage_label"], COLORS["current_label"]
+            self.title_label.setText(
+                f"<span style='color:{vol}'>電圧 [V]（左軸）</span>"
+                f"<span style='color:{COLORS['text_sub']}'>　／　</span>"
+                f"<span style='color:{cur}'>電流 [mA]（右軸）</span>"
+            )
+        else:
+            self.title_label.setText("電流 [mA]")
+
+    def _sync_comb_views(self) -> None:
+        vb = self.p_comb.getViewBox()
+        self.vb_comb_cur.setGeometry(vb.sceneBoundingRect())
+        self.vb_comb_cur.linkedViewChanged(vb, self.vb_comb_cur.XAxis)
+
     def _on_x_range_changed(self, *_):
         if not self._setting_range and not self._live:
             self._redraw_timer.start()
@@ -171,7 +289,7 @@ class PlotPanel(QFrame):
     def _redraw_view(self) -> None:
         if self._data is None or self._data.count == 0:
             return
-        x0, x1 = self.p_cur.getViewBox().viewRange()[0]
+        x0, x1 = self._x_master().getViewBox().viewRange()[0]
         self._draw(x0, x1)
         self._drawn_key = None
 
@@ -180,6 +298,13 @@ class PlotPanel(QFrame):
         x = d.column("elapsed_s")
         s = visible_slice(x, x0, x1)
         xs = x[s]
-        for curve, name in ((self.c_cur, "current_mA"), (self.c_vol, "bus_V")):
-            xd, yd = minmax_decimate(xs, d.column(name)[s], MAX_DRAW_POINTS)
+        cur = d.column("current_mA")[s]
+        vol = d.column("bus_V")[s]
+        if self._mode == MODE_COMBINED:
+            targets = ((self.c_comb_cur, self.vb_comb_cur, cur), (self.c_comb_vol, self.p_comb.getViewBox(), vol))
+        else:
+            targets = ((self.c_cur, self.p_cur.getViewBox(), cur), (self.c_vol, self.p_vol.getViewBox(), vol))
+        for curve, vb, y in targets:
+            xd, yd = minmax_decimate(xs, y, MAX_DRAW_POINTS)
             curve.setData(xd, yd)
+            vb.setYRange(*_screen_y_range(y), padding=0.0)

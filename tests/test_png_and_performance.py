@@ -5,7 +5,7 @@ import time
 import numpy as np
 import pytest
 
-from ina226_monitor.decimate import minmax_decimate, visible_slice
+from ina226_monitor.decimate import minmax_decimate, visible_slice, zero_based_range
 from ina226_monitor.storage import MeasurementInfo, build_note, build_title, save_measurement
 
 from .helpers import mock_data
@@ -120,3 +120,25 @@ def test_100hz_8h_graph_and_save(qapp, tmp_path):
     assert elapsed < 30
     with open(r.paths[0], "rb") as f:
         assert sum(1 for _ in f) - 1 == n
+
+
+def test_zero_based_range():
+    """縦軸の下端は 0。マイナスの値があるときだけ下に広げる。"""
+    assert zero_based_range(np.array([3.6, 3.7])) == pytest.approx((0.0, 3.7 * 1.05))
+    lo, hi = zero_based_range(np.array([-0.2, 5.0]))
+    assert lo < -0.2 and hi > 5.0
+    lo, hi = zero_based_range(np.array([-0.125, -0.094]))  # 無負荷でオフセットがマイナス
+    assert lo < -0.125 and hi == 0.0
+    assert zero_based_range(np.array([0.0, 0.0])) == (0.0, 1.0)
+    assert zero_based_range(np.array([])) == (0.0, 1.0)
+
+
+def test_png_combined_mode(qapp):
+    from ina226_monitor.png_export import render_image
+
+    d = mock_data(500)
+    img = render_image(d, "t", build_note(d), combined=True)
+    assert (img.width(), img.height()) == (1600, 900)
+    # 右側（電流の軸）に数値が描かれている＝右の余白が背景色だけではない
+    right_margin = [img.pixelColor(x, y).name() for x in range(1480, 1560) for y in range(100, 780, 10)]
+    assert len(set(right_margin)) > 1

@@ -30,3 +30,22 @@ def minmax_decimate(x: np.ndarray, y: np.ndarray, max_points: int) -> tuple[np.n
     yo[0::2] = ymin
     yo[1::2] = ymax
     return xo, yo
+
+
+def zero_based_range(y: np.ndarray, pad_ratio: float = 0.05) -> tuple[float, float]:
+    """縦軸の表示範囲。下端は 0（値がマイナスになるときだけ、その値より少し下まで広げる）。
+
+    上端はデータの最大値に少し余白を付ける。データが無い・すべて 0 のときは 0〜1。
+    """
+    if len(y) == 0:
+        return 0.0, 1.0
+    ymin, ymax = float(np.min(y)), float(np.max(y))
+    lo, hi = min(0.0, ymin), max(0.0, ymax)
+    span = hi - lo
+    if span <= 0:
+        return 0.0, 1.0
+    if ymax > 0:
+        hi += span * pad_ratio
+    if ymin < 0:
+        lo -= span * pad_ratio
+    return lo, hi

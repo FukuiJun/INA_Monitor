@@ -55,7 +55,7 @@ from ..settings import Settings
 from ..storage import MeasurementInfo, SaveError, build_note, build_title, save_measurement
 from ..zero_cal import ZeroCalError, ZeroCalFailure, collect_samples, compute_offset, format_offset
 from ..theme import mono_font, ui_font
-from .plot_panel import DEFAULT_RANGE, PlotPanel
+from .plot_panel import DEFAULT_RANGE, MODE_COMBINED, PlotPanel
 from .widgets import FitLabel, SaveOptionsDialog, divider, sub_label
 
 log = logging.getLogger(__name__)
@@ -118,6 +118,7 @@ class MainWindow(QMainWindow):
         self.operator_edit.setText(self.settings.operator)
         if not self.settings.save_dir:
             self.settings.save_dir = str(default_save_dir())
+        self.plot.set_mode(self.settings.plot_mode)
         idx = self.interval_combo.findData(self.settings.interval_ms)
         self.interval_combo.setCurrentIndex(idx if idx >= 0 else self.interval_combo.findData(DEFAULT_INTERVAL_MS))
         self._auto_name()
@@ -495,6 +496,7 @@ class MainWindow(QMainWindow):
         s.target = self.target_edit.text()
         s.operator = self.operator_edit.text()
         s.interval_ms = self.interval_combo.currentData()
+        s.plot_mode = self.plot.mode
         s.save(self.paths.settings_file)
 
     # ================================================================ F-02 開始
@@ -728,7 +730,9 @@ class MainWindow(QMainWindow):
             QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
 
         try:
-            png = image_to_png_bytes(render_image(self.data, build_title(info), build_note(self.data, info)))
+            png = image_to_png_bytes(render_image(
+                self.data, build_title(info), build_note(self.data, info), combined=self.plot.mode == MODE_COMBINED
+            ))
             progress.setValue(10)
             folder.mkdir(parents=True, exist_ok=True)
             result = save_measurement(

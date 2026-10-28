@@ -280,3 +280,50 @@ def test_old_sketch_warns_and_keeps_measuring(window, qapp):
     assert w.state is State.MEASURING and w.data.count > 100
     assert w._info().interval_ms is None
     w.on_stop()
+
+
+def test_y_axis_starts_at_zero_and_combined_mode(window, qapp, tmp_path):
+    """① 縦軸の下端は 0（マイナスのときだけ下へ）② 左軸 電圧・右軸 電流のまとめて表示。"""
+    from ina226_monitor.gui.main_window import MainWindow
+    from ina226_monitor.gui.plot_panel import MODE_COMBINED, MODE_SPLIT
+    from ina226_monitor.measurement import MeasurementData
+    from ina226_monitor.paths import AppPaths
+
+    w = window
+    d = MeasurementData()
+    for i in range(400):
+        d.add(i * 50, 3.7, 20.0 + (i % 40), i * 0.05)
+    w.plot.set_data(d, live=False)
+    w.plot.set_window(None)
+    wait(qapp, 0.1)
+    cur_lo, cur_hi = w.plot.p_cur.getViewBox().viewRange()[1]
+    vol_lo, vol_hi = w.plot.p_vol.getViewBox().viewRange()[1]
+    assert -5 < cur_lo <= 0 < 59 < cur_hi  # 0 が見えていて、0 から大きく離れない
+    assert -0.3 < vol_lo <= 0 < 3.7 < vol_hi
+
+    # マイナスの電流があれば下に広げる
+    neg = MeasurementData()
+    for i in range(400):
+        neg.add(i * 50, 3.7, -0.5 + i * 0.01, i * 0.05)
+    w.plot.set_data(neg, live=False)
+    wait(qapp, 0.1)
+    assert w.plot.p_cur.getViewBox().viewRange()[1][0] < -0.5
+
+    # まとめて表示
+    w.plot.set_data(d, live=False)
+    w.plot.set_mode(MODE_COMBINED)
+    wait(qapp, 0.1)
+    assert w.plot.stack.currentWidget() is w.plot.pw_comb
+    assert len(w.plot.c_comb_cur.xData) > 0 and len(w.plot.c_comb_vol.xData) > 0
+    assert w.plot.p_comb.getViewBox().viewRange()[1][1] > 3.7  # 左軸は電圧
+    assert w.plot.vb_comb_cur.viewRange()[1][1] > 59  # 右軸は電流
+    assert w.plot.vb_comb_cur.viewRange()[0] == w.plot.p_comb.getViewBox().viewRange()[0]  # 横軸は共通
+    assert w.plot.vb_comb_cur.zValue() > w.plot.p_comb.zValue()  # 電流の線が背景に隠れない
+
+    # 表示モードは次回も使う
+    w._save_settings()
+    w2 = MainWindow(w.paths, mock=True)
+    assert w2.plot.mode == MODE_COMBINED
+    w2.plot.set_mode(MODE_SPLIT)
+    assert w2.plot.stack.currentIndex() == 0
+    w2.close()

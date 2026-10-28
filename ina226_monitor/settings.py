@@ -19,6 +19,7 @@ class Settings:
     save_dir: str = ""
     include_pc_time: bool = False
     interval_ms: int = 50
+    plot_mode: str = "split"  # グラフの表示モード（split：2 段／combined：まとめて表示）
 
     @classmethod
     def load(cls, path: Path) -> "Settings":
