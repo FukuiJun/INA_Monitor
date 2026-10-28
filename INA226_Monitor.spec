@@ -5,7 +5,13 @@ a = Analysis(
     ["run_monitor.py"],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ("assets/app_icon.ico", "assets"),
+        ("ina226_monitor/style/app.qss", "ina226_monitor/style"),
+        ("ina226_monitor/style/arrow_down.png", "ina226_monitor/style"),
+        ("ina226_monitor/style/arrow_down_disabled.png", "ina226_monitor/style"),
+        ("ina226_monitor/style/check.png", "ina226_monitor/style"),
+    ],
     hiddenimports=["serial.tools.list_ports"],
     hookspath=[],
     runtime_hooks=[],
@@ -28,6 +34,7 @@ exe = EXE(
     upx=False,
     console=False,
     uac_admin=False,
+    icon="assets/app_icon.ico",
 )
 coll = COLLECT(
     exe,

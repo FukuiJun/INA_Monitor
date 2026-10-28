@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>INA226_Monitor 画面デザイン（参考モック）</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&amp;family=Roboto+Mono:wght@500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#9D2933}a:hover{color:#672422}
+input,select,textarea,button{font-family:inherit;font-size:14px}
+</style>
+</head>
+<body>
+<div style="min-height: 800px; display: flex; flex-direction: column; background: #F3EBE1; font-family: 'Noto Sans JP', sans-serif; color: #27221F">
+
+<header style="border-bottom: 4px solid #9D2933; padding: 8px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; background-color: #2b2a28">
+<div aria-hidden="true" style="display: flex; gap: 3px">
+<span style="width: 5px; height: 20px; border-radius: 2px; background: #9D2933"></span>
+<span style="width: 5px; height: 20px; border-radius: 2px; background: #9D2933"></span>
+<span style="width: 5px; height: 20px; border-radius: 2px; background: #9D2933"></span>
+<span style="width: 5px; height: 20px; border-radius: 2px; background: #9D2933"></span>
+</div>
+<span style="font-size: 19px; font-weight: 700; letter-spacing: 0.02em; color: #fbf8f1">INA226_Monitor</span>
+<span style="color: #fbf8f1; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background-color: #b4581e">● 測定中</span>
+<div style="flex: 1 1 24px"></div>
+<label for="w-port" style="font-size: 13px; font-weight: 500; color: #fbf8f1">ポート</label>
+<select id="w-port" style="height: 36px; min-width: 200px; padding: 0 10px; border: 1px solid #B0927A; border-radius: 8px; background: #FFFCF8; color: #27221F">
+<option>COM7 - Arduino Uno</option>
+</select>
+<button type="button" style="height: 36px; padding: 0 14px; border: 1px solid #B0927A; border-radius: 8px; background: #FFFCF8; color: #27221F">更新</button>
+</header>
+
+<main style="flex: 1; display: flex; flex-wrap: wrap; gap: 12px; padding: 12px">
+
+<section aria-label="測定値と測定情報" style="flex: 0 1 320px; background: #FCF8F3; border: 1px solid #E2D3C2; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box">
+<div style="display: flex; align-items: baseline; justify-content: space-between">
+<span style="font-size: 13px; font-weight: 700">電流</span>
+<span style="font-family: 'Roboto Mono', monospace; font-size: 13px; color: #656255">経過 00:14:02</span>
+</div>
+<div style="color: #FFFFFF; border-radius: 6px; padding: 6px 14px; display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; background-color: #a3282c">
+<span style="font-family: 'Roboto Mono', monospace; font-size: 46px; font-weight: 700; line-height: 1.1">42.381</span>
+<span style="font-size: 20px; font-weight: 700">mA</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid #E2D3C2; border-radius: 6px; background: #FFFCF8">
+<div style="padding: 6px 10px; border-right: 1px solid #E2D3C2">
+<div style="font-size: 12px; color: #656255">電圧 V</div>
+<div style="font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: 700">3.3016</div>
+</div>
+<div style="padding: 6px 10px; border-right: 1px solid #E2D3C2">
+<div style="font-size: 12px; color: #656255">電力 mW</div>
+<div style="font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: 700">139.92</div>
+</div>
+<div style="padding: 6px 10px">
+<div style="font-size: 12px; color: #656255">積算 mAh</div>
+<div style="font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: 700">9.9137</div>
+</div>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+<span style="font-size: 12px; color: #656255">ゼロ点補正値 -0.103 mA</span>
+<button type="button" style="height: 32px; padding: 0 12px; border: 1px solid #27221F; border-radius: 8px; background: #FFFCF8; color: #27221F; font-size: 13px; font-weight: 500">ゼロ点補正</button>
+</div>
+
+<div style="height: 1px; background: #E2D3C2; margin: 2px 0"></div>
+
+<div style="font-size: 13px; font-weight: 700">測定情報</div>
+<div style="display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px 10px">
+<label for="w-board" style="font-size: 13px; color: #656255">基板情報</label>
+<input id="w-board" value="MAIN-RevB" style="min-width: 0; height: 32px; padding: 0 10px; border: 1px solid #B0927A; border-radius: 6px; background: #FFFCF8">
+<label for="w-target" style="font-size: 13px; color: #656255">測定対象</label>
+<input id="w-target" value="REG-U3" style="min-width: 0; height: 32px; padding: 0 10px; border: 1px solid #B0927A; border-radius: 6px; background: #FFFCF8">
+<label for="w-operator" style="font-size: 13px; color: #656255">測定者</label>
+<input id="w-operator" value="福井" style="min-width: 0; height: 32px; padding: 0 10px; border: 1px solid #B0927A; border-radius: 6px; background: #FFFCF8">
+<label for="w-date" style="font-size: 13px; color: #656255">測定日時</label>
+<input id="w-date" value="2026-10-28 14:30:05" readonly="" title="開始ボタンで更新されます" style="min-width: 0; height: 32px; padding: 0 10px; border: 1px solid #E2D3C2; border-radius: 6px; background: #EFE4D7; color: #27221F; font-family: 'Roboto Mono', monospace; font-size: 13px">
+</div>
+
+<div style="height: 1px; background: #E2D3C2; margin: 2px 0"></div>
+
+<label for="w-memo" style="font-size: 13px; color: #656255">メモ <span style="font-size: 11px">（入力すると .txt も出力）</span></label>
+<textarea id="w-memo" rows="2" style="padding: 6px 10px; border: 1px solid #B0927A; border-radius: 6px; background: #FFFCF8; resize: vertical">FW v1.2.0 待機状態</textarea>
+<label for="w-file" style="font-size: 13px; color: #656255">出力ファイル名 <span style="font-size: 11px">（.csv / .png / .txt）</span></label>
+<div style="display: flex; gap: 6px">
+<input id="w-file" value="20261028_143005_REG-U3_MAIN-RevB_福井" style="flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid #B0927A; border-radius: 6px; background: #FFFCF8; font-family: 'Roboto Mono', monospace; font-size: 12px">
+<button type="button" style="height: 32px; padding: 0 10px; border: 1px solid #B0927A; border-radius: 6px; background: #FFFCF8; color: #27221F; font-size: 12px">自動生成</button>
+</div>
+</section>
+
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<section aria-label="グラフ" style="flex: 1; min-width: 0; background: #FCF8F3; border: 1px solid #E2D3C2; border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+<span style="font-size: 12px; font-weight: 700; color: #9A4F1C">電流 [mA]</span>
+<div role="group" aria-label="表示範囲" style="display: flex; border: 1px solid #B0927A; border-radius: 8px; overflow: hidden">
+<button type="button" style="height: 30px; padding: 0 12px; border: none; background: #FFFCF8; color: #27221F; font-size: 13px">10秒</button>
+<button type="button" style="height: 30px; padding: 0 12px; border: none; color: #FCF8F3; font-size: 13px; font-weight: 500; background-color: #b4581e">60秒</button>
+<button type="button" style="height: 30px; padding: 0 12px; border: none; background: #FFFCF8; color: #27221F; font-size: 13px">300秒</button>
+<button type="button" style="height: 30px; padding: 0 12px; border: none; background: #FFFCF8; color: #27221F; font-size: 13px">全体</button>
+</div>
+</div>
+<div style="display: flex; gap: 6px">
+<div aria-hidden="true" style="display: flex; flex-direction: column; justify-content: space-between; font-family: 'Roboto Mono', monospace; font-size: 11px; color: #656255; text-align: right; width: 30px">
+<span>140</span><span>70</span><span>0</span>
+</div>
+<svg viewBox="0 0 600 160" preserveAspectRatio="none" role="img" aria-label="電流のグラフ" style="flex: 1; min-width: 0; height: 300px; display: block; background: #F8F1E8; border: 1px solid #E9DCCD; border-radius: 4px">
+<line x1="0" y1="40" x2="600" y2="40" stroke="#E9DCCD" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<line x1="0" y1="80" x2="600" y2="80" stroke="#E9DCCD" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<line x1="0" y1="120" x2="600" y2="120" stroke="#E9DCCD" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<polyline points="0.0,116.6 2.5,113.7 5.0,114.8 7.5,115.2 10.0,112.3 12.6,111.8 15.1,114.8 17.6,115.4 20.1,114.0 22.6,115.9 25.1,119.4 27.6,119.1 30.1,117.8 32.6,120.1 35.1,121.6 37.7,118.9 40.2,117.2 42.7,118.7 45.2,117.8 47.7,114.0 50.2,24.3 52.7,26.0 55.2,24.5 57.7,22.4 60.3,24.4 62.8,27.0 65.3,115.1 67.8,115.0 70.3,118.6 72.8,120.3 75.3,118.4 77.8,118.9 80.3,121.4 82.8,120.2 85.4,117.1 87.9,117.3 90.4,118.2 92.9,115.2 95.4,112.6 97.9,114.1 100.4,114.7 102.9,112.3 105.4,112.4 107.9,115.8 110.5,116.5 113.0,115.2 115.5,117.3 118.0,120.6 120.5,119.8 123.0,118.3 125.5,120.2 128.0,121.1 130.5,117.9 133.1,116.1 135.6,117.5 138.1,116.4 140.6,112.8 143.1,112.7 145.6,114.8 148.1,113.6 150.6,112.0 153.1,114.6 155.6,117.3 158.2,116.3 160.7,116.4 163.2,119.8 165.7,121.0 168.2,118.7 170.7,29.7 173.2,31.8 175.7,30.1 178.2,26.7 180.8,27.0 183.3,27.8 185.8,114.0 188.3,111.8 190.8,113.8 193.3,114.7 195.8,112.7 198.3,113.4 200.8,117.0 203.3,117.7 205.9,116.4 208.4,118.5 210.9,121.4 213.4,120.0 215.9,118.2 218.4,119.8 220.9,120.1 223.4,116.6 225.9,114.9 228.5,116.3 231.0,115.2 233.5,112.0 236.0,112.5 238.5,114.9 241.0,114.0 243.5,112.9 246.0,115.9 248.5,118.6 251.0,117.4 253.6,117.5 256.1,120.7 258.6,121.3 261.1,118.6 263.6,118.4 266.1,120.1 268.6,117.9 271.1,114.5 273.6,115.0 276.2,115.8 278.7,113.1 281.2,111.5 283.7,114.0 286.2,115.2 288.7,113.5 291.2,25.5 293.7,29.2 296.2,29.7 298.7,28.3 301.3,30.2 303.8,32.6 306.3,119.8 308.8,117.6 311.3,119.0 313.8,118.9 316.3,115.2 318.8,113.7 321.3,115.3 323.8,114.4 326.4,111.6 328.9,112.7 331.4,115.5 333.9,114.9 336.4,114.1 338.9,117.3 341.4,119.8 343.9,118.4 346.4,118.3 349.0,121.1 351.5,121.0 354.0,117.9 356.5,117.6 359.0,118.9 361.5,116.5 364.0,113.3 366.5,114.1 369.0,115.1 371.5,112.7 374.1,111.7 376.6,114.7 379.1,93.3 381.6,91.8 384.1,93.2 386.6,96.8 389.1,96.9 391.6,95.2 394.1,96.9 396.7,98.7 399.2,96.2 401.7,116.7 404.2,117.9 406.7,117.6 409.2,113.9 411.7,23.6 414.2,25.6 416.7,24.9 419.2,22.6 421.8,24.3 424.3,27.4 426.8,116.0 429.3,115.4 431.8,118.6 434.3,120.8 436.8,119.0 439.3,118.6 441.8,121.0 444.4,120.3 446.9,116.9 449.4,116.5 451.9,117.6 454.4,115.2 456.9,112.2 459.4,113.5 461.9,114.8 464.4,112.8 466.9,112.4 469.5,115.8 472.0,117.3 474.5,115.9 477.0,117.3 479.5,120.7 482.0,120.3 484.5,118.3 487.0,119.7 489.5,120.9 492.1,117.9 494.6,115.5 497.1,116.7 499.6,116.3 502.1,112.8 504.6,112.2 507.1,114.6 509.6,114.2 512.1,112.4 514.6,114.5 517.2,117.7 519.7,117.2 522.2,116.7 524.7,119.7 527.2,121.4 529.7,119.1 532.2,29.3 534.7,31.3 537.2,30.1 539.7,26.4 542.3,26.1 544.8,27.3 547.3,114.1 549.8,111.6 552.3,113.4 554.8,115.0 557.3,113.3 559.8,113.5 562.3,117.2 564.9,118.5 567.4,117.0 569.9,118.4 572.4,121.4 574.9,120.4 577.4,118.0 579.9,119.1 582.4,119.9 584.9,116.6 587.4,114.2 590.0,115.6 592.5,115.2 595.0,112.1 597.5,112.1 600.0,114.9" fill="none" stroke="#D57835" stroke-width="1.8" vector-effect="non-scaling-stroke"></polyline>
+</svg>
+</div>
+<span style="font-size: 12px; font-weight: 700; color: #656255">電圧 [V]</span>
+<div style="display: flex; gap: 6px">
+<div aria-hidden="true" style="display: flex; flex-direction: column; justify-content: space-between; font-family: 'Roboto Mono', monospace; font-size: 11px; color: #656255; text-align: right; width: 30px">
+<span>3.31</span><span>3.29</span><span>3.27</span>
+</div>
+<svg viewBox="0 0 600 160" preserveAspectRatio="none" role="img" aria-label="電圧のグラフ" style="flex: 1; min-width: 0; height: 206px; display: block; background: #F8F1E8; border: 1px solid #E9DCCD; border-radius: 4px">
+<line x1="0" y1="40" x2="600" y2="40" stroke="#E9DCCD" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<line x1="0" y1="80" x2="600" y2="80" stroke="#E9DCCD" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<line x1="0" y1="120" x2="600" y2="120" stroke="#E9DCCD" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<polyline points="0.0,32.0 2.5,33.9 5.0,34.3 7.5,33.0 10.0,30.9 12.6,29.7 15.1,30.1 17.6,32.0 20.1,33.9 22.6,34.3 25.1,33.0 27.6,30.9 30.1,29.6 32.6,30.2 35.1,32.1 37.7,33.9 40.2,34.3 42.7,33.0 45.2,30.9 47.7,29.6 50.2,78.2 52.7,80.1 55.2,82.0 57.7,82.3 60.3,80.9 62.8,78.8 65.3,29.6 67.8,30.2 70.3,32.2 72.8,34.0 75.3,34.3 77.8,32.9 80.3,30.8 82.8,29.6 85.4,30.3 87.9,32.2 90.4,34.0 92.9,34.3 95.4,32.8 97.9,30.8 100.4,29.6 102.9,30.3 105.4,32.2 107.9,34.0 110.5,34.3 113.0,32.8 115.5,30.7 118.0,29.6 120.5,30.3 123.0,32.3 125.5,34.0 128.0,34.3 130.5,32.8 133.1,30.7 135.6,29.6 138.1,30.3 140.6,32.3 143.1,34.1 145.6,34.2 148.1,32.7 150.6,30.7 153.1,29.6 155.6,30.4 158.2,32.4 160.7,34.1 163.2,34.2 165.7,32.7 168.2,30.6 170.7,77.6 173.2,78.4 175.7,80.4 178.2,82.1 180.8,82.2 183.3,80.6 185.8,30.6 188.3,29.6 190.8,30.4 193.3,32.4 195.8,34.1 198.3,34.2 200.8,32.6 203.3,30.6 205.9,29.6 208.4,30.5 210.9,32.5 213.4,34.1 215.9,34.2 218.4,32.6 220.9,30.5 223.4,29.6 225.9,30.5 228.5,32.5 231.0,34.2 233.5,34.2 236.0,32.5 238.5,30.5 241.0,29.6 243.5,30.5 246.0,32.6 248.5,34.2 251.0,34.1 253.6,32.5 256.1,30.5 258.6,29.6 261.1,30.6 263.6,32.6 266.1,34.2 268.6,34.1 271.1,32.5 273.6,30.4 276.2,29.6 278.7,30.6 281.2,32.6 283.7,34.2 286.2,34.1 288.7,32.4 291.2,78.4 293.7,77.6 296.2,78.6 298.7,80.7 301.3,82.2 303.8,82.1 306.3,32.4 308.8,30.4 311.3,29.6 313.8,30.7 316.3,32.7 318.8,34.2 321.3,34.1 323.8,32.3 326.4,30.3 328.9,29.6 331.4,30.7 333.9,32.8 336.4,34.3 338.9,34.0 341.4,32.3 343.9,30.3 346.4,29.6 349.0,30.7 351.5,32.8 354.0,34.3 356.5,34.0 359.0,32.3 361.5,30.3 364.0,29.6 366.5,30.8 369.0,32.8 371.5,34.3 374.1,34.0 376.6,32.2 379.1,30.3 381.6,29.6 384.1,30.8 386.6,32.9 389.1,34.3 391.6,34.0 394.1,32.2 396.7,30.2 399.2,29.6 401.7,30.8 404.2,32.9 406.7,34.3 409.2,34.0 411.7,80.1 414.2,78.2 416.7,77.6 419.2,78.9 421.8,80.9 424.3,82.3 426.8,33.9 429.3,32.1 431.8,30.2 434.3,29.6 436.8,30.9 439.3,33.0 441.8,34.3 444.4,33.9 446.9,32.1 449.4,30.2 451.9,29.7 454.4,30.9 456.9,33.0 459.4,34.3 461.9,33.9 464.4,32.0 466.9,30.1 469.5,29.7 472.0,31.0 474.5,33.1 477.0,34.3 479.5,33.9 482.0,32.0 484.5,30.1 487.0,29.7 489.5,31.0 492.1,33.1 494.6,34.4 497.1,33.8 499.6,31.9 502.1,30.1 504.6,29.7 507.1,31.0 509.6,33.1 512.1,34.4 514.6,33.8 517.2,31.9 519.7,30.1 522.2,29.7 524.7,31.1 527.2,33.2 529.7,34.4 532.2,81.8 534.7,79.8 537.2,78.0 539.7,77.7 542.3,79.1 544.8,81.2 547.3,34.4 549.8,33.8 552.3,31.8 554.8,30.0 557.3,29.7 559.8,31.2 562.3,33.2 564.9,34.4 567.4,33.7 569.9,31.8 572.4,30.0 574.9,29.7 577.4,31.2 579.9,33.3 582.4,34.4 584.9,33.7 587.4,31.7 590.0,30.0 592.5,29.7 595.0,31.2 597.5,33.3 600.0,34.4" fill="none" stroke="#27221F" stroke-width="1.6" vector-effect="non-scaling-stroke"></polyline>
+</svg>
+</div>
+<div aria-hidden="true" style="display: flex; justify-content: space-between; padding-left: 36px; font-family: 'Roboto Mono', monospace; font-size: 11px; color: #656255">
+<span>782</span><span>797</span><span>812</span><span>827</span><span>842 s</span>
+</div>
+</section>
+<div role="group" aria-label="測定操作" style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px">
+<button type="button" style="height: 52px; min-width: 140px; padding: 0 28px; border: none; border-radius: 8px; background: #D57835; color: #fbf8f1; font-size: 18px; font-weight: 700">▶ 開始</button>
+<button type="button" style="height: 52px; min-width: 140px; padding: 0 28px; border: none; border-radius: 8px; background: #9D2933; color: #FCF8F3; font-size: 18px; font-weight: 700">■ 停止</button>
+<button type="button" style="height: 52px; min-width: 140px; padding: 0 28px; border: none; border-radius: 8px; background: #27221F; color: #FCF8F3; font-size: 18px; font-weight: 700">保存</button>
+</div>
+</div>
+</main>
+
+<footer style="background: #E2BE9F; color: #27221F; padding: 6px 16px; display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 12px">
+<span>接続中：COM7</span>
+<span>受信サンプル：16,842</span>
+<span>不正行：0</span>
+<span>一時保存：14:44:05</span>
+<span style="margin-left: auto">準備完了</span>
+</footer>
+</div>
+</body>
+</html>

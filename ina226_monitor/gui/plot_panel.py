@@ -1,62 +1,115 @@
-"""リアルタイムグラフ（仕様 F-03）。上：電流 mA、下：電圧 V。横軸は共通。"""
+"""リアルタイムグラフ（仕様 F-03・7.1）。上：電流 mA、下：電圧 V。横軸は共通。"""
 
 from __future__ import annotations
 
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from ..decimate import minmax_decimate, visible_slice
 from ..measurement import MeasurementData
+from ..theme import COLORS, CURRENT_LINE_WIDTH, VOLTAGE_LINE_WIDTH, mono_font, ui_font
 
-CURRENT_COLOR = "#D9661F"  # オレンジ系
-VOLTAGE_COLOR = "#3A3835"  # 黒系
-RANGES = [("10 秒", 10.0), ("60 秒", 60.0), ("300 秒", 300.0), ("全体", None)]
+RANGES = [("10秒", 10.0), ("60秒", 60.0), ("300秒", 300.0), ("全体", None)]
 DEFAULT_RANGE = 60.0
 MAX_DRAW_POINTS = 4000
+LEFT_AXIS_WIDTH = 52
 
 
-class PlotPanel(QWidget):
+class SecondsAxis(pg.AxisItem):
+    """横軸。いちばん右の目盛りにだけ単位 s を付ける。"""
+
+    def tickStrings(self, values, scale, spacing):
+        strs = super().tickStrings(values, scale, spacing)
+        if strs:
+            strs[-1] = f"{strs[-1]} s"
+        return strs
+
+
+def _make_plot(bottom_axis: pg.AxisItem | None = None) -> pg.PlotWidget:
+    axis_items = {"bottom": bottom_axis} if bottom_axis is not None else None
+    pw = pg.PlotWidget(background=COLORS["panel_bg"], axisItems=axis_items)
+    pi = pw.getPlotItem()
+    pi.hideButtons()
+    pi.setMenuEnabled(False)
+    pi.layout.setContentsMargins(0, 0, 0, 0)
+    vb = pi.getViewBox()
+    vb.setBackgroundColor(COLORS["graph_bg"])
+    vb.setBorder(pg.mkPen(COLORS["graph_grid"]))
+    tick_font = mono_font(11)
+    for name in ("left", "bottom"):
+        ax = pi.getAxis(name)
+        ax.setPen(pg.mkPen(COLORS["graph_grid"]))
+        ax.setTextPen(pg.mkPen(COLORS["graph_axis"]))
+        ax.setStyle(tickFont=tick_font, tickLength=0, maxTickLevel=0)  # 主目盛りだけ
+        ax.setTickDensity(0.6)
+    pi.getAxis("left").setWidth(LEFT_AXIS_WIDTH)
+    pi.showGrid(x=False, y=True, alpha=1.0)  # モックに合わせて横線だけ
+    return pw
+
+
+class PlotPanel(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        pg.setConfigOptions(background="w", foreground="k", antialias=False)
+        self.setObjectName("panel")
+        pg.setConfigOptions(antialias=False)  # 太い線でアンチエイリアスをかけると描画が極端に遅くなる
         self._data: MeasurementData | None = None
         self._live = False  # 測定中は表示範囲を自動で追従させる
         self._window: float | None = DEFAULT_RANGE
         self._drawn_key = None
+        self._setting_range = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(6)
 
-        bar = QHBoxLayout()
-        bar.addWidget(QLabel("表示範囲："))
+        top = QHBoxLayout()
+        cur_label = QLabel("電流 [mA]")
+        cur_label.setObjectName("currentAxisLabel")
+        cur_label.setFont(ui_font(12, bold=True))
+        top.addWidget(cur_label)
+        top.addStretch(1)
+        group = QFrame()
+        group.setObjectName("rangeGroup")
+        gl = QHBoxLayout(group)
+        gl.setContentsMargins(1, 1, 1, 1)
+        gl.setSpacing(0)
         self._range_group = QButtonGroup(self)
         self._range_group.setExclusive(True)
         self.range_buttons: dict[float | None, QPushButton] = {}
-        for label, sec in RANGES:
+        for i, (label, sec) in enumerate(RANGES):
             b = QPushButton(label)
             b.setCheckable(True)
             b.setChecked(sec == DEFAULT_RANGE)
+            b.setFont(ui_font(13))
+            if i == 0:
+                b.setProperty("pos", "first")
+            elif i == len(RANGES) - 1:
+                b.setProperty("pos", "last")
             b.clicked.connect(lambda _=False, s=sec: self.set_window(s))
             self._range_group.addButton(b)
             self.range_buttons[sec] = b
-            bar.addWidget(b)
-        bar.addStretch(1)
-        layout.addLayout(bar)
+            gl.addWidget(b)
+        top.addWidget(group)
+        layout.addLayout(top)
 
-        self.glw = pg.GraphicsLayoutWidget()
-        layout.addWidget(self.glw, 1)
-        self.p_cur = self.glw.addPlot(row=0, col=0)
-        self.p_vol = self.glw.addPlot(row=1, col=0)
+        self.pw_cur = _make_plot()
+        self.pw_vol = _make_plot(SecondsAxis("bottom"))
+        self.p_cur = self.pw_cur.getPlotItem()
+        self.p_vol = self.pw_vol.getPlotItem()
+        self.p_cur.getAxis("bottom").setStyle(showValues=False)
+        self.p_cur.getAxis("bottom").setHeight(1)
         self.p_vol.setXLink(self.p_cur)
-        for plot, label in ((self.p_cur, "電流 [mA]"), (self.p_vol, "電圧 [V]")):
-            plot.showGrid(x=True, y=True, alpha=0.3)
-            plot.setLabel("left", label)
-            plot.getAxis("left").setWidth(70)
-            plot.setMouseEnabled(x=True, y=True)
-        self.p_vol.setLabel("bottom", "経過時間 [s]")
-        self.c_cur = self.p_cur.plot(pen=pg.mkPen(CURRENT_COLOR, width=1.5))
-        self.c_vol = self.p_vol.plot(pen=pg.mkPen(VOLTAGE_COLOR, width=1.5))
+        layout.addWidget(self.pw_cur, 3)  # 電流グラフは電圧グラフの約 1.5 倍の高さ
+
+        vol_label = QLabel("電圧 [V]")
+        vol_label.setObjectName("voltageAxisLabel")
+        vol_label.setFont(ui_font(12, bold=True))
+        layout.addWidget(vol_label)
+        layout.addWidget(self.pw_vol, 2)
+
+        self.c_cur = self.p_cur.plot(pen=pg.mkPen(COLORS["current_line"], width=CURRENT_LINE_WIDTH))
+        self.c_vol = self.p_vol.plot(pen=pg.mkPen(COLORS["voltage_line"], width=VOLTAGE_LINE_WIDTH))
 
         # 停止後にユーザーが拡大・移動したら、見えている範囲を間引き直す
         self._redraw_timer = QTimer(self)
@@ -111,8 +164,6 @@ class PlotPanel(QWidget):
         self._drawn_key = key
 
     # ---- 内部 ----
-    _setting_range = False
-
     def _on_x_range_changed(self, *_):
         if not self._setting_range and not self._live:
             self._redraw_timer.start()

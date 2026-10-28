@@ -21,19 +21,38 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
+def set_app_user_model_id() -> None:
+    """タスクバーに python.exe ではなくこのアプリのアイコンを出すための Windows の設定。"""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"FukuiJun.{APP_NAME}.{__version__}")
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
     paths = AppPaths.default()
     setup_logging(paths.log_file)
 
+    set_app_user_model_id()
+
     from PySide6.QtCore import QTimer
+    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
 
     from .gui.main_window import MainWindow
+    from .resources import APP_ICON, resource_path
+    from . import theme
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)
+    theme.apply(app)
+    app.setWindowIcon(QIcon(str(resource_path(APP_ICON))))
     mock = args.mock or args.mock_preload > 0
     win = MainWindow(paths, mock=mock, mock_speed=args.mock_speed)
     win.show()

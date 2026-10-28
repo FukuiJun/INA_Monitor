@@ -9,15 +9,13 @@ import math
 
 import numpy as np
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QLineF, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PySide6.QtGui import QColor, QImage, QPainter, QPen
 
 from .decimate import minmax_decimate
 from .measurement import MeasurementData
+from .theme import COLORS, CURRENT_LINE_WIDTH, VOLTAGE_LINE_WIDTH, mono_font, ui_font
 
 WIDTH, HEIGHT = 1600, 900
-CURRENT_COLOR = "#D9661F"
-VOLTAGE_COLOR = "#3A3835"
-FONT_FAMILIES = ["Yu Gothic UI", "Meiryo UI", "Meiryo", "MS UI Gothic", "Noto Sans CJK JP", "sans-serif"]
 
 
 def nice_ticks(lo: float, hi: float, target: int = 6) -> list[float]:
@@ -54,14 +52,6 @@ def _y_range(y: np.ndarray) -> tuple[float, float]:
     return lo - pad, hi + pad
 
 
-def _font(px: int, bold: bool = False) -> QFont:
-    f = QFont()
-    f.setFamilies(FONT_FAMILIES)
-    f.setPixelSize(px)
-    f.setBold(bold)
-    return f
-
-
 def _draw_plot(
     p: QPainter,
     rect: QRectF,
@@ -69,7 +59,9 @@ def _draw_plot(
     y: np.ndarray,
     x_range: tuple[float, float],
     label: str,
+    label_color: str,
     color: str,
+    width: float,
     show_x_labels: bool,
 ) -> None:
     x0, x1 = x_range
@@ -83,19 +75,20 @@ def _draw_plot(
     def py(v):
         return rect.bottom() - (v - y0) / (y1 - y0) * rect.height()
 
-    p.fillRect(rect, QColor("white"))
-    grid = QPen(QColor("#DDDDDD"), 1)
-    p.setFont(_font(16))
+    p.fillRect(rect, QColor(COLORS["graph_bg"]))
+    grid = QPen(QColor(COLORS["graph_grid"]), 1)
+    axis_text = QColor(COLORS["graph_axis"])
+    p.setFont(mono_font(16))
     for t in xticks:
         p.setPen(grid)
         p.drawLine(QPointF(px(t), rect.top()), QPointF(px(t), rect.bottom()))
         if show_x_labels:
-            p.setPen(QColor("black"))
+            p.setPen(axis_text)
             p.drawText(QRectF(px(t) - 60, rect.bottom() + 6, 120, 22), Qt.AlignHCenter | Qt.AlignTop, _fmt_tick(t, xticks))
     for t in yticks:
         p.setPen(grid)
         p.drawLine(QPointF(rect.left(), py(t)), QPointF(rect.right(), py(t)))
-        p.setPen(QColor("black"))
+        p.setPen(axis_text)
         p.drawText(QRectF(rect.left() - 100, py(t) - 11, 92, 22), Qt.AlignRight | Qt.AlignVCenter, _fmt_tick(t, yticks))
 
     if len(x):
@@ -103,19 +96,20 @@ def _draw_plot(
         pts = [QPointF(a, b) for a, b in zip(map(px, xd.tolist()), map(py, yd.tolist()))]
         p.save()
         p.setClipRect(rect)
-        p.setPen(QPen(QColor(color), 1.5))
+        p.setPen(QPen(QColor(color), width))
         # drawPolyline は太さのある線の継ぎ目計算が遅いので、線分の集まりとして描く
         p.drawLines([QLineF(a, b) for a, b in zip(pts, pts[1:])])
         p.restore()
     else:
-        p.setPen(QColor("#888888"))
+        p.setPen(axis_text)
         p.drawText(rect, Qt.AlignCenter, "データなし")
 
-    p.setPen(QPen(QColor("black"), 1))
+    p.setPen(QPen(QColor(COLORS["graph_grid"]), 1))
     p.drawRect(rect)
     # 縦軸ラベル
     p.save()
-    p.setFont(_font(18))
+    p.setPen(QColor(label_color))
+    p.setFont(ui_font(18, bold=True))
     p.translate(rect.left() - 92, rect.center().y())
     p.rotate(-90)
     p.drawText(QRectF(-rect.height() / 2, -24, rect.height(), 28), Qt.AlignCenter, label)
@@ -124,13 +118,14 @@ def _draw_plot(
 
 def render_image(data: MeasurementData, title: str, note: str) -> QImage:
     img = QImage(WIDTH, HEIGHT, QImage.Format_RGB32)
-    img.fill(QColor("white"))
+    img.fill(QColor(COLORS["panel_bg"]))
     p = QPainter(img)
     p.setRenderHint(QPainter.Antialiasing, True)
     p.setRenderHint(QPainter.TextAntialiasing, True)
 
-    p.setPen(QColor("black"))
-    p.setFont(_font(26, bold=True))
+    text = QColor(COLORS["text"])
+    p.setPen(text)
+    p.setFont(ui_font(26, bold=True))
     p.drawText(QRectF(0, 14, WIDTH, 40), Qt.AlignCenter, title)
 
     x = data.column("elapsed_s")
@@ -141,13 +136,16 @@ def render_image(data: MeasurementData, title: str, note: str) -> QImage:
     plot_h = (HEIGHT - top - bottom - gap) / 2
     r_cur = QRectF(left, top, WIDTH - left - right, plot_h)
     r_vol = QRectF(left, top + plot_h + gap, WIDTH - left - right, plot_h)
-    _draw_plot(p, r_cur, x, data.column("current_mA"), x_range, "電流 [mA]", CURRENT_COLOR, False)
-    _draw_plot(p, r_vol, x, data.column("bus_V"), x_range, "電圧 [V]", VOLTAGE_COLOR, True)
+    _draw_plot(p, r_cur, x, data.column("current_mA"), x_range, "電流 [mA]", COLORS["current_label"],
+               COLORS["current_line"], CURRENT_LINE_WIDTH, False)
+    _draw_plot(p, r_vol, x, data.column("bus_V"), x_range, "電圧 [V]", COLORS["voltage_label"],
+               COLORS["voltage_line"], VOLTAGE_LINE_WIDTH, True)
 
-    p.setPen(QColor("black"))
-    p.setFont(_font(18))
+    p.setPen(QColor(COLORS["text_sub"]))
+    p.setFont(ui_font(18))
     p.drawText(QRectF(0, r_vol.bottom() + 28, WIDTH, 26), Qt.AlignCenter, "経過時間 [s]")
-    p.setFont(_font(20))
+    p.setPen(text)
+    p.setFont(ui_font(20))
     p.drawText(QRectF(0, HEIGHT - 44, WIDTH, 32), Qt.AlignCenter, note)
     p.end()
     return img

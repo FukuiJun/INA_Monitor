@@ -11,27 +11,24 @@ from enum import Enum
 from pathlib import Path
 
 from PySide6.QtCore import QEventLoop, Qt, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QFont
+from PySide6.QtGui import QDesktopServices, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QDialog,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QProgressDialog,
     QPushButton,
+    QMenu,
     QScrollArea,
-    QSizePolicy,
-    QSplitter,
     QStatusBar,
     QVBoxLayout,
     QWidget,
@@ -50,7 +47,9 @@ from ..serial_io import PortOpenError, SerialReader, list_ports, open_port
 from ..settings import Settings
 from ..storage import MeasurementInfo, SaveError, build_note, build_title, save_measurement
 from ..zero_cal import ZeroCalError, ZeroCalFailure, collect_samples, compute_offset, format_offset
+from ..theme import mono_font, ui_font
 from .plot_panel import DEFAULT_RANGE, PlotPanel
+from .widgets import FitLabel, SaveOptionsDialog, divider, sub_label
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +57,7 @@ UPDATE_INTERVAL_MS = 200
 TMP_FLUSH_INTERVAL_MS = 60_000
 NO_DATA_TIMEOUT_S = 5.0
 INFO_MAX_LEN = 30
+LEFT_PANEL_WIDTH = 320
 
 MSG_NO_PORT = "Arduino が見つかりません。USB の接続を確認してください"
 MSG_UNSAVED = "保存されていないデータがあります。保存しますか？"
@@ -103,9 +103,8 @@ class MainWindow(QMainWindow):
         self.board_edit.setText(self.settings.board)
         self.target_edit.setText(self.settings.target)
         self.operator_edit.setText(self.settings.operator)
-        save_dir = self.settings.save_dir or str(default_save_dir())
-        self.save_dir_edit.setText(save_dir)
-        self.pc_time_check.setChecked(self.settings.include_pc_time)
+        if not self.settings.save_dir:
+            self.settings.save_dir = str(default_save_dir())
         self._auto_name()
 
         self.tick_timer = QTimer(self)
@@ -118,61 +117,229 @@ class MainWindow(QMainWindow):
         self.refresh_ports()
         self._update_numbers()
         self._update_status()
+        if not self.msg_label.text():
+            self.set_message("準備完了")
 
     # ================================================================ UI
     def _build_ui(self) -> None:
         central = QWidget()
+        central.setObjectName("central")
         root = QVBoxLayout(central)
-        root.setContentsMargins(8, 6, 8, 4)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(self._build_header())
 
-        # ---- 上部ツールバー ----
-        bar = QHBoxLayout()
-        title = QLabel(APP_NAME)
-        f = title.font()
-        f.setPointSize(f.pointSize() + 4)
-        f.setBold(True)
-        title.setFont(f)
-        bar.addWidget(title)
-        self.measuring_label = QLabel("")
-        self.measuring_label.setMinimumWidth(80)
-        bar.addWidget(self.measuring_label)
-        bar.addSpacing(16)
-        bar.addWidget(QLabel("COM ポート"))
-        self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(260)
-        bar.addWidget(self.port_combo)
-        self.refresh_button = QPushButton("更新")
-        self.refresh_button.clicked.connect(self.refresh_ports)
-        bar.addWidget(self.refresh_button)
-        bar.addStretch(1)
-        self.start_button = QPushButton("開始")
-        self.stop_button = QPushButton("停止")
-        self.save_button = QPushButton("保存")
-        for b in (self.start_button, self.stop_button, self.save_button):
-            b.setMinimumWidth(90)
-            b.setMinimumHeight(32)
-            bar.addWidget(b)
-        self.start_button.clicked.connect(self.on_start)
-        self.stop_button.clicked.connect(self.on_stop)
-        self.save_button.clicked.connect(self.on_save)
-        root.addLayout(bar)
-
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        root.addWidget(line)
-
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._build_left())
+        body = QHBoxLayout()
+        body.setContentsMargins(12, 12, 12, 12)
+        body.setSpacing(12)
+        body.addWidget(self._build_left())  # 幅固定
+        right = QVBoxLayout()
+        right.setSpacing(12)
         self.plot = PlotPanel()
-        splitter.addWidget(self.plot)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([390, 890])
-        root.addWidget(splitter, 1)
+        right.addWidget(self.plot, 1)
+        actions = QHBoxLayout()
+        actions.setSpacing(10)
+        actions.addStretch(1)
+        self.start_button = self._action_button("▶ 開始", "startButton", self.on_start)
+        self.stop_button = self._action_button("■ 停止", "stopButton", self.on_stop)
+        self.save_button = self._action_button("保存", "saveButton", self.on_save)
+        for b in (self.start_button, self.stop_button, self.save_button):
+            actions.addWidget(b)
+        right.addLayout(actions)
+        body.addLayout(right, 1)  # 広げたときはグラフ側が広がる
+        root.addLayout(body, 1)
         self.setCentralWidget(central)
+        self._build_status_bar()
 
-        # ---- 下部ステータスバー ----
+    def _action_button(self, text: str, name: str, slot) -> QPushButton:
+        b = QPushButton(text)
+        b.setObjectName(name)
+        b.setFont(ui_font(18, bold=True))
+        b.setMinimumSize(140, 52)
+        b.clicked.connect(slot)
+        return b
+
+    def _build_header(self) -> QFrame:
+        header = QFrame()
+        header.setObjectName("header")
+        header.setFixedHeight(56)  # 下端の帯 4px を含む
+        lay = QHBoxLayout(header)
+        lay.setContentsMargins(16, 8, 16, 12)
+        lay.setSpacing(10)
+        decor = QHBoxLayout()
+        decor.setSpacing(3)
+        for _ in range(4):  # 端子台を模した飾り
+            bar = QFrame()
+            bar.setObjectName("headerDecor")
+            bar.setFixedSize(5, 20)
+            decor.addWidget(bar)
+        lay.addLayout(decor)
+        name = QLabel(APP_NAME)
+        name.setObjectName("appName")
+        name.setFont(ui_font(19, bold=True))
+        lay.addWidget(name)
+        self.measuring_badge = QLabel("● 測定中")
+        self.measuring_badge.setObjectName("measuringBadge")
+        self.measuring_badge.setFont(ui_font(12, bold=True))
+        self.measuring_badge.setVisible(False)
+        lay.addWidget(self.measuring_badge)
+        lay.addStretch(1)
+        port_label = QLabel("ポート")
+        port_label.setObjectName("portLabel")
+        port_label.setFont(ui_font(13))
+        lay.addWidget(port_label)
+        self.port_combo = QComboBox()
+        self.port_combo.setFont(ui_font(14))
+        self.port_combo.setMinimumWidth(220)
+        self.port_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        lay.addWidget(self.port_combo)
+        self.refresh_button = QPushButton("更新")
+        self.refresh_button.setObjectName("refreshButton")
+        self.refresh_button.setFont(ui_font(14))
+        self.refresh_button.clicked.connect(self.refresh_ports)
+        lay.addWidget(self.refresh_button)
+        return header
+
+    def _build_left(self) -> QWidget:
+        panel = QFrame()
+        panel.setObjectName("panel")
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(8)
+
+        # 電流（見出しと経過時間）
+        row = QHBoxLayout()
+        heading = QLabel("電流")
+        heading.setFont(ui_font(13, bold=True))
+        row.addWidget(heading)
+        row.addStretch(1)
+        self.elapsed_label = QLabel()
+        self.elapsed_label.setProperty("role", "sub")
+        self.elapsed_label.setFont(mono_font(13))
+        row.addWidget(self.elapsed_label)
+        lay.addLayout(row)
+
+        # 電流の数値バッジ
+        badge = QFrame()
+        badge.setObjectName("currentBadge")
+        bl = QHBoxLayout(badge)
+        bl.setContentsMargins(14, 4, 14, 4)
+        bl.setSpacing(8)
+        self.current_label = FitLabel(mono_font(46, bold=True), min_px=24)
+        bl.addWidget(self.current_label, 1)
+        unit = QLabel("mA")
+        unit.setFont(ui_font(20, bold=True))
+        bl.addWidget(unit, 0, Qt.AlignBottom)
+        lay.addWidget(badge)
+
+        # 電圧・電力・積算
+        grid = QFrame()
+        grid.setObjectName("valueGrid")
+        gl = QHBoxLayout(grid)
+        gl.setContentsMargins(0, 0, 0, 0)
+        gl.setSpacing(0)
+        cells = []
+        for i, title in enumerate(("電圧 V", "電力 mW", "積算 mAh")):
+            cell = QFrame()
+            cell.setObjectName("valueCell")
+            cell.setProperty("divider", i < 2)
+            cl = QVBoxLayout(cell)
+            cl.setContentsMargins(10, 6, 8, 6)
+            cl.setSpacing(0)
+            cl.addWidget(sub_label(title, 12))
+            value = FitLabel(mono_font(18, bold=True), min_px=11)
+            value.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            cl.addWidget(value)
+            gl.addWidget(cell, 1)
+            cells.append(value)
+        self.voltage_label, self.power_label, self.mah_label = cells
+        lay.addWidget(grid)
+
+        # ゼロ点補正（リセットは右クリックメニュー）
+        row = QHBoxLayout()
+        self.offset_label = sub_label("", 12)
+        row.addWidget(self.offset_label)
+        row.addStretch(1)
+        self.zero_button = QPushButton("ゼロ点補正")
+        self.zero_button.setObjectName("zeroButton")
+        self.zero_button.setFont(ui_font(13))
+        self.zero_button.setMinimumHeight(32)
+        self.zero_button.setToolTip("右クリックで「補正値をリセット」")
+        self.zero_button.clicked.connect(self.on_zero_cal)
+        self.zero_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.zero_button.customContextMenuRequested.connect(self._zero_menu)
+        row.addWidget(self.zero_button)
+        lay.addLayout(row)
+        self._update_offset_label()
+
+        lay.addWidget(divider())
+
+        # 測定情報（F-07）
+        heading = QLabel("測定情報")
+        heading.setFont(ui_font(13, bold=True))
+        lay.addWidget(heading)
+        form = QGridLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(6)
+        self.board_edit = QLineEdit()
+        self.target_edit = QLineEdit()
+        self.operator_edit = QLineEdit()
+        for w in (self.board_edit, self.target_edit, self.operator_edit):
+            w.setMaxLength(INFO_MAX_LEN)
+            w.setFont(ui_font(14))
+        self.datetime_edit = QLineEdit()
+        self.datetime_edit.setReadOnly(True)
+        self.datetime_edit.setFocusPolicy(Qt.NoFocus)
+        self.datetime_edit.setFont(mono_font(13))
+        self.datetime_edit.setToolTip("開始ボタンで更新されます")
+        for r, (text, w) in enumerate((("基板情報", self.board_edit), ("測定対象", self.target_edit),
+                                        ("測定者", self.operator_edit), ("測定日時", self.datetime_edit))):
+            w.setFixedHeight(32)
+            form.addWidget(sub_label(text), r, 0)
+            form.addWidget(w, r, 1)
+        form.setColumnStretch(1, 1)
+        lay.addLayout(form)
+
+        lay.addWidget(divider())
+
+        # メモ
+        memo_label = sub_label("メモ <span style='font-size:11px'>（入力すると .txt も出力）</span>")
+        lay.addWidget(memo_label)
+        self.memo_edit = QPlainTextEdit()
+        self.memo_edit.setFont(ui_font(14))
+        line_h = QFontMetrics(self.memo_edit.font()).lineSpacing()
+        self.memo_edit.setFixedHeight(line_h * 2 + 18)  # 2 行
+        lay.addWidget(self.memo_edit)
+
+        # 出力ファイル名（F-08）
+        lay.addWidget(sub_label("出力ファイル名 <span style='font-size:11px'>（.csv / .png / .txt）</span>"))
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self.name_edit = QLineEdit()
+        self.name_edit.setFont(mono_font(12))
+        self.name_edit.setFixedHeight(32)
+        self.name_edit.textEdited.connect(self._on_name_edited)
+        self.auto_name_button = QPushButton("自動生成")
+        self.auto_name_button.setFont(ui_font(12))
+        self.auto_name_button.setFixedHeight(32)
+        self.auto_name_button.clicked.connect(self.on_auto_name)
+        row.addWidget(self.name_edit, 1)
+        row.addWidget(self.auto_name_button)
+        lay.addLayout(row)
+        lay.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("leftScroll")
+        scroll.setWidget(panel)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFixedWidth(LEFT_PANEL_WIDTH)
+        return scroll
+
+    def _build_status_bar(self) -> None:
         sb = QStatusBar()
+        sb.setSizeGripEnabled(False)
         self.conn_label = QLabel()
         self.samples_label = QLabel()
         self.invalid_label = QLabel()
@@ -182,123 +349,15 @@ class MainWindow(QMainWindow):
         self.open_folder_button = QPushButton("フォルダを開く")
         self.open_folder_button.setVisible(False)
         self.open_folder_button.clicked.connect(self._open_saved_folder)
+        for w in (self.conn_label, self.samples_label, self.invalid_label, self.tmp_label,
+                  self.msg_label, self.open_folder_button):
+            w.setFont(ui_font(12))
         for w in (self.conn_label, self.samples_label, self.invalid_label, self.tmp_label):
-            w.setMinimumWidth(110)
             sb.addWidget(w)
-        sb.addWidget(self.msg_label, 1)
+        sb.addPermanentWidget(self.msg_label)  # メッセージは右寄せ
         sb.addPermanentWidget(self.open_folder_button)
         self.setStatusBar(sb)
         self._saved_folder: Path | None = None
-
-    def _build_left(self) -> QWidget:
-        panel = QWidget()
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(0, 0, 6, 0)
-
-        # 数値表示（F-04）
-        g = QGroupBox("測定値")
-        gl = QVBoxLayout(g)
-        self.current_label = QLabel()
-        big = QFont(self.current_label.font())
-        big.setPointSize(30)
-        big.setBold(True)
-        self.current_label.setFont(big)
-        self.current_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("電流"), 0, Qt.AlignTop)
-        row.addWidget(self.current_label, 1)
-        gl.addLayout(row)
-        form = QFormLayout()
-        self.voltage_label = QLabel()
-        self.power_label = QLabel()
-        self.mah_label = QLabel()
-        self.elapsed_label = QLabel()
-        mid = QFont(self.voltage_label.font())
-        mid.setPointSize(mid.pointSize() + 3)
-        for text, w in (("電圧", self.voltage_label), ("電力", self.power_label),
-                        ("積算", self.mah_label), ("経過時間", self.elapsed_label)):
-            w.setFont(mid)
-            w.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            form.addRow(text, w)
-        gl.addLayout(form)
-        lay.addWidget(g)
-
-        # ゼロ点補正（F-12）
-        g = QGroupBox("ゼロ点補正")
-        gl = QVBoxLayout(g)
-        self.offset_label = QLabel()
-        gl.addWidget(self.offset_label)
-        row = QHBoxLayout()
-        self.zero_button = QPushButton("ゼロ点補正")
-        self.zero_reset_button = QPushButton("補正値をリセット")
-        self.zero_button.clicked.connect(self.on_zero_cal)
-        self.zero_reset_button.clicked.connect(self.on_zero_reset)
-        row.addWidget(self.zero_button)
-        row.addWidget(self.zero_reset_button)
-        gl.addLayout(row)
-        lay.addWidget(g)
-        self._update_offset_label()
-
-        # 測定情報（F-07）
-        g = QGroupBox("測定情報")
-        form = QFormLayout(g)
-        self.board_edit = QLineEdit()
-        self.target_edit = QLineEdit()
-        self.operator_edit = QLineEdit()
-        for w in (self.board_edit, self.target_edit, self.operator_edit):
-            w.setMaxLength(INFO_MAX_LEN)
-        self.board_edit.setPlaceholderText("例：MAIN-RevB")
-        self.target_edit.setPlaceholderText("例：REG-U3")
-        self.datetime_edit = QLineEdit()
-        self.datetime_edit.setReadOnly(True)
-        self.datetime_edit.setFocusPolicy(Qt.NoFocus)
-        self.datetime_edit.setPlaceholderText("開始時に自動で入ります")
-        form.addRow("基板情報", self.board_edit)
-        form.addRow("測定対象", self.target_edit)
-        form.addRow("測定者", self.operator_edit)
-        form.addRow("測定日時", self.datetime_edit)
-        lay.addWidget(g)
-
-        # メモ
-        g = QGroupBox("メモ（入力すると保存時に .txt も出力）")
-        gl = QVBoxLayout(g)
-        self.memo_edit = QPlainTextEdit()
-        self.memo_edit.setMinimumHeight(56)
-        gl.addWidget(self.memo_edit)
-        lay.addWidget(g, 1)
-
-        # 出力ファイル名と保存先（F-08）
-        g = QGroupBox("出力")
-        grid = QGridLayout(g)
-        self.name_edit = QLineEdit()
-        self.name_edit.textEdited.connect(self._on_name_edited)
-        self.auto_name_button = QPushButton("自動生成")
-        self.auto_name_button.clicked.connect(self.on_auto_name)
-        grid.addWidget(QLabel("出力ファイル名"), 0, 0)
-        grid.addWidget(self.name_edit, 0, 1)
-        grid.addWidget(self.auto_name_button, 0, 2)
-        hint = QLabel(".csv / .png（メモ入力時は .txt も）が付きます")
-        hint.setStyleSheet("color: gray;")
-        grid.addWidget(hint, 1, 1, 1, 2)
-        self.save_dir_edit = QLineEdit()
-        self.save_dir_edit.setReadOnly(True)
-        self.browse_button = QPushButton("参照…")
-        self.browse_button.clicked.connect(self.on_browse)
-        grid.addWidget(QLabel("保存先"), 2, 0)
-        grid.addWidget(self.save_dir_edit, 2, 1)
-        grid.addWidget(self.browse_button, 2, 2)
-        self.pc_time_check = QCheckBox("PC の日時を出力する")
-        grid.addWidget(self.pc_time_check, 3, 1, 1, 2)
-        grid.setColumnStretch(1, 1)
-        lay.addWidget(g)
-
-        scroll = QScrollArea()
-        scroll.setWidget(panel)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(380)
-        scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        return scroll
 
     # ================================================================ 表示更新
     def _update_buttons(self) -> None:
@@ -308,30 +367,23 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(self.state is State.MEASURING and not self.busy)
         self.save_button.setEnabled(self.state is State.STOPPED and not self.busy)
         self.zero_button.setEnabled(idle_like and has_port)
-        self.zero_reset_button.setEnabled(idle_like)
         self.port_combo.setEnabled(idle_like)
         self.refresh_button.setEnabled(idle_like)
-        self.browse_button.setEnabled(not self.busy)
-        if self.state is State.MEASURING:
-            self.measuring_label.setText("● 測定中")
-            self.measuring_label.setStyleSheet("color: #C00000; font-weight: bold;")
-        else:
-            self.measuring_label.setText("停止中" if self.state is State.STOPPED else "")
-            self.measuring_label.setStyleSheet("color: gray;")
+        self.measuring_badge.setVisible(self.state is State.MEASURING)
 
     def _update_numbers(self) -> None:
         last = self.data.last() if self.data else None
         if last is None:
-            self.current_label.setText("--- mA")
+            self.current_label.setText("---")
             for w in (self.voltage_label, self.power_label, self.mah_label):
                 w.setText("---")
-            self.elapsed_label.setText(format_hms(0))
+            self.elapsed_label.setText(f"経過 {format_hms(0)}")
             return
-        self.current_label.setText(f"{last['current_mA']:.3f} mA")
-        self.voltage_label.setText(f"{last['bus_V']:.4f} V")
-        self.power_label.setText(f"{last['power_mW']:.3f} mW")
-        self.mah_label.setText(f"{self.data.mAh:.4f} mAh")
-        self.elapsed_label.setText(format_hms(self.data.last_elapsed_s))
+        self.current_label.setText(f"{last['current_mA']:.3f}")
+        self.voltage_label.setText(f"{last['bus_V']:.4f}")
+        self.power_label.setText(f"{last['power_mW']:.3f}")
+        self.mah_label.setText(f"{self.data.mAh:.4f}")
+        self.elapsed_label.setText(f"経過 {format_hms(self.data.last_elapsed_s)}")
 
     def _update_status(self) -> None:
         if self.state is State.MEASURING:
@@ -340,11 +392,11 @@ class MainWindow(QMainWindow):
             self.conn_label.setText("未接続")
         n = self.data.count if self.data else 0
         bad = self.data.invalid_count if self.data else 0
-        self.samples_label.setText(f"受信サンプル数 {n}")
-        self.invalid_label.setText(f"不正行数 {bad}")
+        self.samples_label.setText(f"受信サンプル：{n:,}")
+        self.invalid_label.setText(f"不正行：{bad:,}")
         last_write = self.writer.status()[0] if self.writer else None
         t = time.strftime("%H:%M:%S", time.localtime(last_write)) if last_write else "--:--:--"
-        self.tmp_label.setText(f"一時ファイル {t}")
+        self.tmp_label.setText(f"一時保存：{t}")
 
     def _update_offset_label(self) -> None:
         self.offset_label.setText(f"ゼロ点補正値 {format_offset(self.offset_mA)}")
@@ -394,13 +446,6 @@ class MainWindow(QMainWindow):
     def _on_name_edited(self, _text: str) -> None:
         self.manual_name = True
 
-    def on_browse(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "保存先フォルダ", self.save_dir_edit.text())
-        if folder:
-            self.save_dir_edit.setText(folder)
-            self.settings.save_dir = folder
-            self._save_settings()
-
     def _save_settings(self) -> None:
         s = self.settings
         if self.port_combo.currentData():
@@ -408,8 +453,6 @@ class MainWindow(QMainWindow):
         s.board = self.board_edit.text()
         s.target = self.target_edit.text()
         s.operator = self.operator_edit.text()
-        s.save_dir = self.save_dir_edit.text()
-        s.include_pc_time = self.pc_time_check.isChecked()
         s.save(self.paths.settings_file)
 
     # ================================================================ F-02 開始
@@ -592,8 +635,13 @@ class MainWindow(QMainWindow):
             return False
         if base != self.name_edit.text():
             self.name_edit.setText(base)
-        folder = Path(self.save_dir_edit.text() or default_save_dir())
         info = self._info()
+        options = self._ask_save_options(base, info.has_memo)
+        if options is None:
+            return False
+        folder, include_pc_time = options
+        self.settings.save_dir = str(folder)
+        self.settings.include_pc_time = include_pc_time
         self._save_settings()
 
         self.busy = True
@@ -615,7 +663,7 @@ class MainWindow(QMainWindow):
             progress.setValue(10)
             folder.mkdir(parents=True, exist_ok=True)
             result = save_measurement(
-                folder, base, self.data, info, self.pc_time_check.isChecked(), png, on_progress
+                folder, base, self.data, info, include_pc_time, png, on_progress
             )
         except (SaveError, OSError) as e:
             progress.close()
@@ -641,6 +689,15 @@ class MainWindow(QMainWindow):
         self._update_buttons()
         self._update_status()
         return True
+
+    def _ask_save_options(self, base: str, with_txt: bool) -> tuple[Path, bool] | None:
+        """保存先フォルダと PC 日時の出力を選ぶ。キャンセルなら None。"""
+        dlg = SaveOptionsDialog(
+            self, self.settings.save_dir or str(default_save_dir()), self.settings.include_pc_time, base, with_txt
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return None
+        return Path(dlg.folder), dlg.include_pc_time
 
     def _open_saved_folder(self) -> None:
         if self._saved_folder:
@@ -764,6 +821,13 @@ class MainWindow(QMainWindow):
         self.set_message(msg)
         QMessageBox.warning(self, APP_NAME, msg)
 
+    def _zero_menu(self, pos) -> None:
+        menu = QMenu(self)
+        action = menu.addAction("補正値をリセット")
+        action.setEnabled(self.offset_mA is not None and self.state is not State.MEASURING and not self.busy)
+        action.triggered.connect(self.on_zero_reset)
+        menu.exec(self.zero_button.mapToGlobal(pos))
+
     def on_zero_reset(self) -> None:
         self.offset_mA = None
         self._update_offset_label()
@@ -786,7 +850,9 @@ class MainWindow(QMainWindow):
             box.exec()
             clicked = box.clickedButton()
             if clicked is save:
-                folder = QFileDialog.getExistingDirectory(self, "復旧したデータの保存先", self.save_dir_edit.text())
+                folder = QFileDialog.getExistingDirectory(
+                    self, "復旧したデータの保存先", self.settings.save_dir or str(default_save_dir())
+                )
                 if not folder:
                     continue
                 try:

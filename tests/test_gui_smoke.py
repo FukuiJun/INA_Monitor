@@ -6,7 +6,6 @@ import pytest
 
 pytest.importorskip("PySide6.QtWidgets")
 
-from PySide6.QtCore import QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from ina226_monitor.paths import AppPaths  # noqa: E402
@@ -14,7 +13,11 @@ from ina226_monitor.paths import AppPaths  # noqa: E402
 
 @pytest.fixture(scope="module")
 def qapp():
-    return QApplication.instance() or QApplication([])
+    from ina226_monitor import theme
+
+    app = QApplication.instance() or QApplication([])
+    theme.apply(app)
+    return app
 
 
 def wait(app, seconds):
@@ -31,9 +34,11 @@ def window(qapp, tmp_path, monkeypatch):
     # メッセージボックスは自動で閉じる
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: QMessageBox.Ok))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Ok))
+    # 保存オプションのダイアログは出さずに、決めた値を返す
+    out = tmp_path / "out"
+    monkeypatch.setattr(mw.MainWindow, "_ask_save_options", lambda self, base, with_txt: (out, False))
     paths = AppPaths.under(tmp_path / "app")
     w = mw.MainWindow(paths, mock=True, mock_speed=10.0)
-    w.save_dir_edit.setText(str(tmp_path / "out"))
     w.show()
     yield w
     w.unsaved = False
@@ -64,6 +69,7 @@ def test_measure_stop_save(window, qapp, tmp_path):
     assert w.name_edit.text().endswith("_REG-U3_MAIN-RevB_福井")
     assert not w.start_button.isEnabled() and w.stop_button.isEnabled() and not w.save_button.isEnabled()
     assert not w.zero_button.isEnabled() and not w.port_combo.isEnabled()
+    assert w.measuring_badge.isVisible()
 
     wait(qapp, 2.0)  # 10 倍速なので約 20 秒分
     assert w.data.count > 100
@@ -73,10 +79,11 @@ def test_measure_stop_save(window, qapp, tmp_path):
 
     w.on_stop()
     assert w.state is State.STOPPED and w.unsaved
+    assert not w.measuring_badge.isVisible()
     assert w.plot.window is None  # 停止後は全体表示
     assert w.save_button.isEnabled() and w.start_button.isEnabled()
     n = w.data.count
-    assert w.samples_label.text() == f"受信サンプル数 {n}"
+    assert w.samples_label.text() == f"受信サンプル：{n:,}"
 
     w.memo_edit.setPlainText("メモ\n2 行目")
     assert w.on_save()
@@ -169,3 +176,67 @@ def test_preload_8h(window, qapp, tmp_path):
     t0 = time.perf_counter()
     assert w.on_save()
     assert time.perf_counter() - t0 < 30
+
+
+def test_save_cancelled_in_options_dialog(window, qapp, monkeypatch, tmp_path):
+    from ina226_monitor.gui.main_window import MainWindow
+
+    w = window
+    select(w, "MOCK1")
+    w.on_start()
+    wait(qapp, 0.5)
+    w.on_stop()
+    monkeypatch.setattr(MainWindow, "_ask_save_options", lambda self, base, with_txt: None)
+    assert not w.on_save()
+    assert w.unsaved
+    assert not (tmp_path / "out").exists()
+
+
+def test_layout_left_panel_fixed(window, qapp):
+    """AC-25：広げても左パネルの幅は変わらず、グラフが広がる。最小サイズでも操作部品が見える。"""
+    from PySide6.QtWidgets import QScrollArea
+
+    from ina226_monitor.gui.main_window import LEFT_PANEL_WIDTH
+
+    w = window
+    scroll = w.findChild(QScrollArea, "leftScroll")
+    w.resize(1920, 1080)
+    wait(qapp, 0.1)
+    assert scroll.width() == LEFT_PANEL_WIDTH
+    big = w.plot.width()
+    w.resize(1024, 700)
+    wait(qapp, 0.1)
+    assert scroll.width() == LEFT_PANEL_WIDTH
+    assert w.plot.width() < big
+    for b in (w.start_button, w.stop_button, w.save_button, w.refresh_button, w.zero_button, w.auto_name_button):
+        assert b.isVisible()
+        r = b.mapTo(w, b.rect().bottomRight())
+        assert r.x() <= w.width() and r.y() <= w.height()
+
+
+def test_theme_stylesheet_and_icon(qapp):
+    from PySide6.QtGui import QIcon
+
+    from ina226_monitor import theme
+    from ina226_monitor.resources import APP_ICON, resource_path
+
+    import re
+    from pathlib import Path
+
+    qss = theme.stylesheet()
+    assert "$" not in qss
+    for url in re.findall(r"url\(([^)]+)\)", qss):
+        assert Path(url).is_file(), url
+    assert "#A3282C" in qss and "rgba(213, 120, 53, 102)" in qss  # 開始ボタンの無効時 = 40%
+    icon = QIcon(str(resource_path(APP_ICON)))
+    assert not icon.isNull()
+    assert (256, 256) in [(s.width(), s.height()) for s in icon.availableSizes()]
+
+
+def test_zero_reset_from_context_menu(window, qapp):
+    w = window
+    w.offset_mA = -0.1
+    w._update_offset_label()
+    assert w.offset_label.text() == "ゼロ点補正値 -0.100 mA"
+    w.on_zero_reset()
+    assert w.offset_label.text() == "ゼロ点補正値 なし"
