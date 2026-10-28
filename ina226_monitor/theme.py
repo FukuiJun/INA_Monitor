@@ -46,16 +46,17 @@ COLORS: dict[str, str] = {
     "status_text": "#27221F",
     # グラフ
     "current_label": "#9A4F1C",
-    "voltage_label": "#656255",
-    "graph_bg": "#F8F1E8",
-    "graph_grid": "#E9DCCD",
-    "graph_axis": "#656255",
+    "voltage_label": "#4E7A3A",  # 濃い緑
+    "graph_bg": "#2B2A28",  # 描画領域は暗色（墨色に近い濃色）
+    "graph_border": "#1E1C1A",
+    "graph_grid": "#45403A",
+    "graph_axis": "#656255",  # 軸の数値（描画領域の外、明るいパネル上）
     "current_line": "#D57835",
-    "voltage_line": "#27221F",
+    "voltage_line": "#8CC27A",  # 緑（萌黄系）
 }
 
 CURRENT_LINE_WIDTH = 2.0
-VOLTAGE_LINE_WIDTH = 1.5
+VOLTAGE_LINE_WIDTH = 2.0
 DISABLED_OPACITY = 0.4
 
 UI_FONTS = ["Yu Gothic UI", "Meiryo UI", "Meiryo", "Noto Sans CJK JP", "sans-serif"]

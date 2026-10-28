@@ -62,7 +62,7 @@ def _make_plot(bottom_axis: pg.AxisItem | None = None) -> pg.PlotWidget:
     pi.layout.setContentsMargins(0, 0, 0, 0)
     vb = pi.getViewBox()
     vb.setBackgroundColor(COLORS["graph_bg"])
-    vb.setBorder(pg.mkPen(COLORS["graph_grid"]))
+    vb.setBorder(pg.mkPen(COLORS["graph_border"]))
     for name in ("left", "bottom"):
         _style_axis(pi.getAxis(name), COLORS["graph_axis"])
     pi.getAxis("left").setWidth(LEFT_AXIS_WIDTH)

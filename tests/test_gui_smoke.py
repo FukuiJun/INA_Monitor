@@ -287,7 +287,6 @@ def test_y_axis_starts_at_zero_and_combined_mode(window, qapp, tmp_path):
     from ina226_monitor.gui.main_window import MainWindow
     from ina226_monitor.gui.plot_panel import MODE_COMBINED, MODE_SPLIT
     from ina226_monitor.measurement import MeasurementData
-    from ina226_monitor.paths import AppPaths
 
     w = window
     d = MeasurementData()

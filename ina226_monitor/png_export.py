@@ -127,9 +127,9 @@ def _draw_series(
 
 def _finish_plot(p: QPainter, rect: QRectF, has_data: bool) -> None:
     if not has_data:
-        p.setPen(QColor(COLORS["graph_axis"]))
+        p.setPen(QColor(COLORS["panel_border"]))  # 暗い描画領域の上でも読める色
         p.drawText(rect, Qt.AlignCenter, "データなし")
-    p.setPen(QPen(QColor(COLORS["graph_grid"]), 1))
+    p.setPen(QPen(QColor(COLORS["graph_border"]), 1))
     p.drawRect(rect)
 
 

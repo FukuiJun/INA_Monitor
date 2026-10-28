@@ -23,6 +23,8 @@ jobs:
         run: python -m pytest -q
       - name: Build exe
         run: pyinstaller --noconfirm --clean INA226_Monitor.spec
+      - name: Check exe icon
+        run: python tools/check_exe_icon.py dist/INA226_Monitor/INA226_Monitor.exe assets/app_icon.ico
       - name: Zip
         shell: pwsh
         run: |
