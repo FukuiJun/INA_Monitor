@@ -240,3 +240,43 @@ def test_zero_reset_from_context_menu(window, qapp):
     assert w.offset_label.text() == "ゼロ点補正値 -0.100 mA"
     w.on_zero_reset()
     assert w.offset_label.text() == "ゼロ点補正値 なし"
+
+
+def select_interval(w, ms):
+    w.interval_combo.setCurrentIndex(w.interval_combo.findData(ms))
+
+
+def test_interval_10ms_is_sent_and_recorded(window, qapp, tmp_path):
+    """F-13：周期を選んで開始すると Arduino に送られ、応答の値が TXT に残る。"""
+    import numpy as np
+
+    w = window
+    select(w, "MOCK1")
+    select_interval(w, 10)
+    w.on_start()
+    assert not w.interval_combo.isEnabled()  # 測定中は変えられない
+    wait(qapp, 1.0)
+    assert w.interval_ack == (10, 4)
+    w.on_stop()
+    assert w.interval_combo.isEnabled()
+    dt = np.diff(w.data.column("elapsed_s"))
+    assert np.median(dt) == pytest.approx(0.010, abs=0.0015)
+    w.memo_edit.setPlainText("10 ms")
+    assert w.on_save()
+    txt = next((tmp_path / "out").glob("*.txt")).read_text(encoding="utf-8-sig")
+    assert "サンプリング周期: 10 ms（INA226 平均 4 回）" in txt
+    assert w.settings.interval_ms == 10  # 次回も 10 ms
+
+
+def test_old_sketch_warns_and_keeps_measuring(window, qapp):
+    from ina226_monitor.gui.main_window import MSG_OLD_SKETCH, State
+
+    w = window
+    select(w, "MOCK5")
+    select_interval(w, 100)
+    w.on_start()
+    wait(qapp, 3.8)  # 応答待ち 3 秒を過ぎる
+    assert w.msg_label.text() == MSG_OLD_SKETCH
+    assert w.state is State.MEASURING and w.data.count > 100
+    assert w._info().interval_ms is None
+    w.on_stop()

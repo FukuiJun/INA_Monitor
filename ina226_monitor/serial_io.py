@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 
 from .mock_serial import MockProfile, MockSerial
-from .protocol import LineKind, LineSplitter, parse_line
+from .protocol import LineKind, LineSplitter, interval_command, parse_line
 from .zero_cal import STARTUP_DISCARD_S
 
 log = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ MOCK_PORTS: dict[str, tuple[str, MockProfile]] = {
     "MOCK2": ("模擬データ（無負荷）", MockProfile(load=False)),
     "MOCK3": ("模擬データ（20 秒後に USB 抜け）", MockProfile(disconnect_after_s=20.0)),
     "MOCK4": ("模擬データ（30 秒ごとにリセット）", MockProfile(reset_every_s=30.0)),
+    "MOCK5": ("模擬データ（周期を変えられない古いスケッチ）", MockProfile(ignore_commands=True)),
 }
 
 
@@ -91,15 +92,19 @@ def open_port(device: str, mock_speed: float = 1.0):
 class SerialReader(threading.Thread):
     """受信・行判定を行い、結果をキューに入れる。
 
+    interval_ms を指定すると、ヘッダ行（Arduino の起動・リセット直後に出る）を受けるたびに
+    周期変更コマンドを送る（仕様 F-13）。
+
     キューに入るもの：
       ("line", ParsedLine, pc_time)  … 判定済みの 1 行（pc_time は受信時の PC 時刻）
       ("disconnected", message)      … 読み込みで例外（USB 抜けなど）。スレッドは終わる
     """
 
-    def __init__(self, port, out: queue.Queue, clock=time.monotonic) -> None:
+    def __init__(self, port, out: queue.Queue, interval_ms: int | None = None, clock=time.monotonic) -> None:
         super().__init__(name="serial-reader", daemon=True)
         self.port = port
         self.out = out
+        self.interval_ms = interval_ms
         self._clock = clock
         self._stop_event = threading.Event()
 
@@ -124,11 +129,19 @@ class SerialReader(threading.Thread):
                     if parsed.kind is LineKind.DATA and self._clock() - t_open < STARTUP_DISCARD_S:
                         continue
                     self.out.put(("line", parsed, pc_time))
+                    if parsed.kind is LineKind.HEADER and self.interval_ms is not None:
+                        self._send_interval()
         finally:
             try:
                 self.port.close()
             except Exception:
                 pass
+
+    def _send_interval(self) -> None:
+        try:
+            self.port.write(interval_command(self.interval_ms))
+        except Exception as e:  # 送れなくても受信は続ける（周期は既定のまま）
+            log.warning("周期変更コマンドを送れません: %s", e)
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop_event.set()

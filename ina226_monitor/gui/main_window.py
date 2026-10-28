@@ -41,7 +41,14 @@ from ..measurement import MeasurementData
 from ..mock_serial import MockProfile, generate_lines
 from ..paths import AppPaths, default_save_dir
 from ..png_export import image_to_png_bytes, render_image
-from ..protocol import LineKind, parse_line
+from ..protocol import (
+    DEFAULT_INTERVAL_MS,
+    INTERVAL_CHOICES_MS,
+    LineKind,
+    interval_label,
+    parse_interval_ack,
+    parse_line,
+)
 from ..recovery import RecoveryWriter, delete_item, find_recoverable, recover_to
 from ..serial_io import PortOpenError, SerialReader, list_ports, open_port
 from ..settings import Settings
@@ -56,11 +63,14 @@ log = logging.getLogger(__name__)
 UPDATE_INTERVAL_MS = 200
 TMP_FLUSH_INTERVAL_MS = 60_000
 NO_DATA_TIMEOUT_S = 5.0
+INTERVAL_ACK_TIMEOUT_S = 3.0  # ヘッダ行のあと、周期変更の応答を待つ時間
+DEFAULT_AVG = 16  # 既定周期（50 ms）でのスケッチの平均回数
 INFO_MAX_LEN = 30
 LEFT_PANEL_WIDTH = 320
 
 MSG_NO_PORT = "Arduino が見つかりません。USB の接続を確認してください"
 MSG_UNSAVED = "保存されていないデータがあります。保存しますか？"
+MSG_OLD_SKETCH = "Arduino のスケッチが古いため周期を変更できません（firmware を書き込み直してください）"
 
 
 class State(Enum):
@@ -93,6 +103,9 @@ class MainWindow(QMainWindow):
         self._tmp_error_shown = False
         self._last_data_mono = 0.0
         self._no_data_shown = False
+        self.interval_requested = DEFAULT_INTERVAL_MS  # 今回の測定で Arduino に頼んだ周期
+        self.interval_ack: tuple[int, int] | None = None  # Arduino の応答 (周期 ms, 平均回数)
+        self._ack_wait_since: float | None = None  # ヘッダ行を受けて応答を待ち始めた時刻
         self._window_before_stop: float | None = DEFAULT_RANGE
 
         self.setWindowTitle(f"{APP_NAME} v{__version__}")
@@ -105,6 +118,8 @@ class MainWindow(QMainWindow):
         self.operator_edit.setText(self.settings.operator)
         if not self.settings.save_dir:
             self.settings.save_dir = str(default_save_dir())
+        idx = self.interval_combo.findData(self.settings.interval_ms)
+        self.interval_combo.setCurrentIndex(idx if idx >= 0 else self.interval_combo.findData(DEFAULT_INTERVAL_MS))
         self._auto_name()
 
         self.tick_timer = QTimer(self)
@@ -184,6 +199,18 @@ class MainWindow(QMainWindow):
         self.measuring_badge.setVisible(False)
         lay.addWidget(self.measuring_badge)
         lay.addStretch(1)
+        interval_label_w = QLabel("周期")
+        interval_label_w.setObjectName("intervalLabel")
+        interval_label_w.setFont(ui_font(13))
+        lay.addWidget(interval_label_w)
+        self.interval_combo = QComboBox()
+        self.interval_combo.setFont(ui_font(14))
+        self.interval_combo.setMinimumWidth(150)
+        self.interval_combo.setToolTip("Arduino の出力周期。開始時に Arduino へ送ります（速いほどノイズが増えます）")
+        for ms in INTERVAL_CHOICES_MS:
+            self.interval_combo.addItem(interval_label(ms), ms)
+        lay.addWidget(self.interval_combo)
+        lay.addSpacing(6)
         port_label = QLabel("ポート")
         port_label.setObjectName("portLabel")
         port_label.setFont(ui_font(13))
@@ -191,7 +218,9 @@ class MainWindow(QMainWindow):
         self.port_combo = QComboBox()
         self.port_combo.setFont(ui_font(14))
         self.port_combo.setMinimumWidth(220)
-        self.port_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        # 長いポート名でヘッダーがはみ出さないよう、幅は 22 文字ぶんまで
+        self.port_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.port_combo.setMinimumContentsLength(22)
         lay.addWidget(self.port_combo)
         self.refresh_button = QPushButton("更新")
         self.refresh_button.setObjectName("refreshButton")
@@ -368,6 +397,7 @@ class MainWindow(QMainWindow):
         self.save_button.setEnabled(self.state is State.STOPPED and not self.busy)
         self.zero_button.setEnabled(idle_like and has_port)
         self.port_combo.setEnabled(idle_like)
+        self.interval_combo.setEnabled(idle_like)
         self.refresh_button.setEnabled(idle_like)
         self.measuring_badge.setVisible(self.state is State.MEASURING)
 
@@ -425,6 +455,7 @@ class MainWindow(QMainWindow):
 
     # ================================================================ F-07 / F-08 ファイル名
     def _info(self) -> MeasurementInfo:
+        interval_ms, avg = self._effective_interval()
         return MeasurementInfo(
             board=self.board_edit.text().strip(),
             target=self.target_edit.text().strip(),
@@ -432,7 +463,17 @@ class MainWindow(QMainWindow):
             started_at=self.started_at.strftime("%Y-%m-%d %H:%M:%S") if self.started_at else "",
             ended_at=self.ended_at.strftime("%Y-%m-%d %H:%M:%S") if self.ended_at else "",
             memo=self.memo_edit.toPlainText(),
+            interval_ms=interval_ms,
+            avg=avg,
         )
+
+    def _effective_interval(self) -> tuple[int | None, int | None]:
+        """記録する周期と平均回数。Arduino の応答が無ければ、既定周期を頼んだときだけ既定値とみなす。"""
+        if self.interval_ack is not None:
+            return self.interval_ack
+        if self.interval_requested == DEFAULT_INTERVAL_MS:
+            return DEFAULT_INTERVAL_MS, DEFAULT_AVG
+        return None, None
 
     def _auto_name(self) -> None:
         self.name_edit.setText(
@@ -453,6 +494,7 @@ class MainWindow(QMainWindow):
         s.board = self.board_edit.text()
         s.target = self.target_edit.text()
         s.operator = self.operator_edit.text()
+        s.interval_ms = self.interval_combo.currentData()
         s.save(self.paths.settings_file)
 
     # ================================================================ F-02 開始
@@ -486,15 +528,19 @@ class MainWindow(QMainWindow):
         self.writer = RecoveryWriter(
             self.paths.recovery_dir,
             stamp(self.started_at),
-            {"board": info.board, "target": info.target, "operator": info.operator, "started_at": info.started_at},
+            {"board": info.board, "target": info.target, "operator": info.operator, "started_at": info.started_at,
+             "interval_ms": self.interval_combo.currentData()},
         )
         self._tmp_submitted = 0
         self._tmp_error_shown = False
         self._last_data_mono = time.monotonic()
         self._no_data_shown = False
+        self.interval_requested = self.interval_combo.currentData()
+        self.interval_ack = None
+        self._ack_wait_since = None
 
         self.rx_queue = queue.Queue()
-        self.reader = SerialReader(port, self.rx_queue)
+        self.reader = SerialReader(port, self.rx_queue, interval_ms=self.interval_requested)
         self.reader.start()
         self.state = State.MEASURING
         self.set_message("測定を開始しました")
@@ -525,12 +571,34 @@ class MainWindow(QMainWindow):
                         reset = True
                     self._last_data_mono = time.monotonic()
                 elif parsed.kind is LineKind.COMMENT:
-                    self.set_message(parsed.text)
+                    self._on_comment(parsed.text)
+                elif parsed.kind is LineKind.HEADER:
+                    # Arduino が起動・リセットした。受信スレッドが周期変更を送ったので応答を待つ
+                    self._ack_wait_since = time.monotonic()
                 elif parsed.kind is LineKind.INVALID:
                     d.invalid_count += 1
             elif ev[0] == "disconnected":
                 disconnected = ev[1]
         return reset, disconnected
+
+    def _on_comment(self, text: str) -> None:
+        ack = parse_interval_ack(text)
+        if ack is not None:
+            self.interval_ack = ack
+            self._ack_wait_since = None
+            self.set_message(f"サンプリング周期 {ack[0]} ms（INA226 平均 {ack[1]} 回）で測定しています")
+            return
+        if text.startswith("# error"):
+            log.warning("Arduino からのエラー: %s", text)
+        self.set_message(text)
+
+    def _check_interval_ack(self) -> None:
+        if self._ack_wait_since is None or time.monotonic() - self._ack_wait_since < INTERVAL_ACK_TIMEOUT_S:
+            return
+        self._ack_wait_since = None
+        if self.interval_ack is None and self.interval_requested != DEFAULT_INTERVAL_MS:
+            log.warning("周期変更の応答がありません（%s, %d ms）", self._device, self.interval_requested)
+            self.set_message(MSG_OLD_SKETCH)
 
     def _tick(self) -> None:
         if self.state is not State.MEASURING:
@@ -547,6 +615,7 @@ class MainWindow(QMainWindow):
             self._no_data_shown = True
             log.warning("データが届いていません（%s）", self._device)
             self.set_message("データが届いていません")
+        self._check_interval_ack()
         self._check_tmp_status()
         self._update_numbers()
         self.plot.refresh()
@@ -659,7 +728,7 @@ class MainWindow(QMainWindow):
             QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
 
         try:
-            png = image_to_png_bytes(render_image(self.data, build_title(info), build_note(self.data)))
+            png = image_to_png_bytes(render_image(self.data, build_title(info), build_note(self.data, info)))
             progress.setValue(10)
             folder.mkdir(parents=True, exist_ok=True)
             result = save_measurement(
@@ -884,6 +953,8 @@ class MainWindow(QMainWindow):
         self.ended_at = datetime.now().replace(microsecond=0)
         self.datetime_edit.setText(self.started_at.strftime("%Y-%m-%d %H:%M:%S"))
         self._auto_name()
+        self.interval_requested = DEFAULT_INTERVAL_MS
+        self.interval_ack = (DEFAULT_INTERVAL_MS, DEFAULT_AVG)
         self.state = State.STOPPED
         self.unsaved = True
         self.plot.set_data(d, live=False)

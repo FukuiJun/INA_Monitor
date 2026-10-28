@@ -88,3 +88,35 @@ def test_ac13_save_under_30_seconds(big_data, qapp, tmp_path):
     assert elapsed < 30
     with open(r.paths[0], "rb") as f:
         assert sum(1 for _ in f) - 1 == 576_000  # 受信サンプル数と CSV 行数が一致
+
+
+def test_100hz_8h_graph_and_save(qapp, tmp_path):
+    """周期 10 ms × 8 時間（2,880,000 サンプル）でもグラフ更新 0.5 秒以内・保存 30 秒以内。"""
+    from ina226_monitor.measurement import MeasurementData
+    from ina226_monitor.png_export import image_to_png_bytes, render_image
+
+    n = 2_880_000
+    rng = np.random.default_rng(0)
+    current = (25 + 10 * np.sin(np.arange(n) / 2000) + rng.normal(0, 0.05, n)).tolist()
+    d = MeasurementData()
+    t0 = 1_793_165_405.0
+    for i, c in enumerate(current):
+        d.add(i * 10, 3.7, c, t0 + i * 0.01)
+    assert d.count == n
+
+    x, y = d.column("elapsed_s"), d.column("current_mA")
+    t = time.perf_counter()
+    for x0, x1 in [(0, x[-1]), (x[-1] - 60, x[-1]), (10_000, 10_300)]:
+        s = visible_slice(x, x0, x1)
+        minmax_decimate(x[s], y[s], 4000)
+    assert time.perf_counter() - t < 0.5
+
+    info = MeasurementInfo(target="REG-U3", memo="100 Hz", interval_ms=10, avg=4)
+    t = time.perf_counter()
+    png = image_to_png_bytes(render_image(d, build_title(info), build_note(d, info)))
+    r = save_measurement(tmp_path, "fast", d, info, True, png)
+    elapsed = time.perf_counter() - t
+    print(f"\n2,880,000 サンプル保存: {elapsed:.1f} s")
+    assert elapsed < 30
+    with open(r.paths[0], "rb") as f:
+        assert sum(1 for _ in f) - 1 == n

@@ -79,3 +79,28 @@ class LineSplitter:
 
     def clear(self) -> None:
         self._buf.clear()
+
+
+# ---- サンプリング周期の設定（仕様 F-13） ----
+DEFAULT_INTERVAL_MS = 50  # Arduino がリセット直後に使う周期
+INTERVAL_CHOICES_MS = (10, 20, 50, 100, 200, 500, 1000)
+MIN_INTERVAL_MS = 10
+MAX_INTERVAL_MS = 1000
+
+_ACK_RE = re.compile(r"^#\s*interval_ms=(\d+)\s+avg=(\d+)\s*$")
+
+
+def interval_command(ms: int) -> bytes:
+    """Arduino に送る周期変更コマンド。"""
+    return f"INTERVAL {int(ms)}\n".encode("ascii")
+
+
+def parse_interval_ack(text: str) -> tuple[int, int] | None:
+    """Arduino の応答 `# interval_ms=10 avg=4` を (周期 ms, 平均回数) にする。応答でなければ None。"""
+    m = _ACK_RE.match(text.strip())
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def interval_label(ms: int) -> str:
+    hz = 1000 / ms
+    return f"{ms} ms（{hz:g} Hz）"

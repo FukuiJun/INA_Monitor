@@ -27,6 +27,8 @@ class MeasurementInfo:
     started_at: str = ""  # YYYY-MM-DD HH:MM:SS
     ended_at: str = ""
     memo: str = ""
+    interval_ms: int | None = None  # Arduino が応答した周期（応答なしは None）
+    avg: int | None = None  # INA226 の平均回数（応答の値）
 
     @property
     def has_memo(self) -> bool:
@@ -52,11 +54,22 @@ def build_title(info: MeasurementInfo) -> str:
     return " / ".join(p.strip() for p in parts if p.strip())
 
 
-def build_note(data: MeasurementData) -> str:
-    return (
+def format_interval(info: MeasurementInfo) -> str:
+    if info.interval_ms is None:
+        return "不明（Arduino から応答なし）"
+    avg = f"（INA226 平均 {info.avg} 回）" if info.avg else ""
+    return f"{info.interval_ms} ms{avg}"
+
+
+def build_note(data: MeasurementData, info: MeasurementInfo | None = None) -> str:
+    note = (
         f"積算 {data.mAh:.4f} mAh ／ 測定時間 {format_hms(data.last_elapsed_s)} ／ "
         f"サンプル数 {data.count} ／ ゼロ点補正 {format_offset(data.offset_mA)}"
     )
+    if info is not None:
+        interval = f"{info.interval_ms} ms" if info.interval_ms is not None else "不明"
+        note += f" ／ 周期 {interval}"
+    return note
 
 
 def build_txt(data: MeasurementData, info: MeasurementInfo) -> str:
@@ -69,6 +82,7 @@ def build_txt(data: MeasurementData, info: MeasurementInfo) -> str:
         f"終了日時: {info.ended_at}",
         f"測定時間: {format_hms(data.last_elapsed_s)}",
         f"サンプル数: {data.count}",
+        f"サンプリング周期: {format_interval(info)}",
         f"不正行数: {data.invalid_count}",
         f"積算電流量: {data.mAh:.4f} mAh",
         f"ゼロ点補正値: {format_offset(data.offset_mA)}",

@@ -18,6 +18,7 @@ class Settings:
     operator: str = ""
     save_dir: str = ""
     include_pc_time: bool = False
+    interval_ms: int = 50
 
     @classmethod
     def load(cls, path: Path) -> "Settings":

@@ -26,7 +26,7 @@ QFrame#headerDecor {
     border: none;
     border-radius: 2px;
 }
-QLabel#appName, QLabel#portLabel {
+QLabel#appName, QLabel#portLabel, QLabel#intervalLabel {
     color: ${header_text};
     background: transparent;
 }

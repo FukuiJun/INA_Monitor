@@ -77,8 +77,9 @@ def test_txt_content():
     d.add(0, 3.7, 100.0, 0.0)
     d.invalid_count = 2
     info = MeasurementInfo(**{**INFO.__dict__, "memo": "x"})
+    info.interval_ms, info.avg = 10, 4
     lines = build_txt(d, info).split("\n")
-    assert lines[:12] == [
+    assert lines[:13] == [
         "基板情報: MAIN-RevB",
         "測定対象: REG-U3",
         "測定者: 福井",
@@ -86,13 +87,14 @@ def test_txt_content():
         "終了日時: 2026-10-28 14:45:05",
         "測定時間: 00:00:00",
         "サンプル数: 1",
+        "サンプリング周期: 10 ms（INA226 平均 4 回）",
         "不正行数: 2",
         "積算電流量: 0.0000 mAh",
         "ゼロ点補正値: -0.103 mA",
         f"ソフトウェア: INA226_Monitor v{__version__}",
         "シャント抵抗: 0.080 Ω（Arduino スケッチ設定値）",
     ]
-    assert lines[12:14] == ["", "[メモ]"]
+    assert lines[13:15] == ["", "[メモ]"]
     # 空欄の項目も行は出す
     assert build_txt(d, MeasurementInfo()).split("\n")[0] == "基板情報: "
 
@@ -104,6 +106,9 @@ def test_title_and_note():
     for i in range(18001):
         d.add(i * 50, 3.7, 100.0, 0.0)
     assert build_note(d) == "積算 25.0000 mAh ／ 測定時間 00:15:00 ／ サンプル数 18001 ／ ゼロ点補正 なし"
+    assert build_note(d, MeasurementInfo(interval_ms=1000, avg=256)).endswith("／ ゼロ点補正 なし ／ 周期 1000 ms")
+    assert build_note(d, MeasurementInfo()).endswith("／ 周期 不明")
+    assert "サンプリング周期: 不明（Arduino から応答なし）" in build_txt(d, MeasurementInfo())
 
 
 def test_existing_name_gets_suffix_for_all_files(tmp_path):

@@ -1,6 +1,7 @@
 """模擬シリアル：実機なしで Arduino + INA226 の出力をまねる（開発・AC-13 用）。
 
-pyserial の Serial と同じく read(size) / in_waiting / reset_input_buffer() / close() を持つ。
+pyserial の Serial と同じく read(size) / in_waiting / write() / reset_input_buffer() / close() を持つ。
+write() で受けた `INTERVAL <ms>` は付録 A のスケッチと同じく周期を変えて応答を返す。
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ import random
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+
+from .protocol import DEFAULT_INTERVAL_MS, MAX_INTERVAL_MS, MIN_INTERVAL_MS
 
 SHUNT_OHM = 0.080
 INA226_OFFSET_MA = -0.1  # 無負荷でも出るオフセット（実機と同程度）
@@ -22,7 +25,35 @@ class MockProfile:
     reset_every_s: float | None = None  # Arduino のリセットを模擬する間隔
     disconnect_after_s: float | None = None  # USB 抜けを模擬する時刻
     invalid_every_s: float | None = 30.0  # 途中で切れた行を混ぜる間隔
+    ignore_commands: bool = False  # True なら周期変更コマンドに応答しない古いスケッチ
     seed: int = 1
+
+
+class MockArduinoState:
+    """模擬 Arduino の設定。write() で変わり、行の生成側が読む。"""
+
+    AVG_COUNTS = (1, 4, 16, 64, 128, 256, 512, 1024)
+
+    def __init__(self) -> None:
+        self.interval_ms = DEFAULT_INTERVAL_MS
+
+    @classmethod
+    def avg_for(cls, interval_ms: int) -> int:
+        """スケッチと同じ規則：変換時間の合計が周期の 90% 以下になる最大の平均回数。"""
+        return max(n for n in cls.AVG_COUNTS if n * 2.2 <= interval_ms * 0.9 or n == 1)
+
+    def handle_command(self, line: str) -> str:
+        """1 行のコマンドを処理して応答行を返す。"""
+        if line.startswith("INTERVAL "):
+            try:
+                ms = int(line[9:])
+            except ValueError:
+                ms = -1
+            if not MIN_INTERVAL_MS <= ms <= MAX_INTERVAL_MS:
+                return "# error: interval out of range"
+            self.interval_ms = ms
+            return f"# interval_ms={ms} avg={self.avg_for(ms)}"
+        return "# error: unknown command"
 
 
 def true_current_mA(t: float, load: bool) -> float:
@@ -46,18 +77,22 @@ def _data_line(time_ms: int, t: float, profile: MockProfile, rng: random.Random)
     return f"{time_ms},{bus_V:.4f},{shunt_uV:.1f},{current_mA:.3f}"
 
 
-def mock_events(profile: MockProfile = MockProfile()) -> Iterator[tuple[float, str | None]]:
+def mock_events(
+    profile: MockProfile = MockProfile(), state: MockArduinoState | None = None
+) -> Iterator[tuple[float, str | None]]:
     """(ポートを開いてからの秒, 行) を無限に返す。行が None なら USB 抜け。"""
+    state = state or MockArduinoState()
     rng = random.Random(profile.seed)
     seg_start = 0.0  # Arduino 起動時刻（ポートを開いた時刻からの秒）
     next_invalid = profile.invalid_every_s
     while True:
+        state.interval_ms = DEFAULT_INTERVAL_MS  # リセットで既定の周期に戻る
         t = seg_start + profile.reset_delay_s
         for line in ("# I2C scan...", "#  found 0x41", "time_ms,bus_V,shunt_uV,current_mA"):
             yield t, line
         time_ms = int(profile.reset_delay_s * 1000)
         while True:
-            time_ms += 51 if rng.random() < 0.1 else 50
+            time_ms += state.interval_ms + (1 if rng.random() < 0.1 else 0)
             t = seg_start + time_ms / 1000.0
             if profile.disconnect_after_s is not None and t >= profile.disconnect_after_s:
                 yield t, None
@@ -101,7 +136,9 @@ class MockSerial:
         self._clock = clock
         self._sleep = sleep
         self._t0 = clock()
-        self._events = mock_events(profile)
+        self.state = MockArduinoState()
+        self._events = mock_events(profile, self.state)
+        self._cmd = bytearray()
         self._next = next(self._events)
         self._buf = bytearray()
         self._disconnected = False
@@ -148,6 +185,20 @@ class MockSerial:
                 return b""
             wait = (self._next[0] - self._now()) / self.speed
             self._sleep(min(remaining, max(wait, 0.001)))
+
+    def write(self, data: bytes) -> int:
+        """PC からの送信。改行までを 1 コマンドとして処理し、応答をすぐ受信側に入れる。"""
+        self._check()
+        self._pump()
+        self._cmd.extend(data)
+        while b"\n" in self._cmd:
+            line, _, rest = bytes(self._cmd).partition(b"\n")
+            self._cmd = bytearray(rest)
+            if self.profile.ignore_commands:
+                continue
+            reply = self.state.handle_command(line.decode("ascii", errors="replace").strip())
+            self._buf.extend(reply.encode("ascii") + b"\r\n")
+        return len(data)
 
     def reset_input_buffer(self) -> None:
         self._pump()
