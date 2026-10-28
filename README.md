@@ -136,7 +136,23 @@ build.bat
 配布は zip を渡し、受け取った人は展開して `INA226_Monitor.exe` を起動します（インストール不要）。
 
 GitHub に push すると `.github/workflows/build-windows.yml` が Windows 上でテストとビルドを行い、
-フォルダ一式を `INA226_Monitor-windows` というアーティファクトとして残します。
+フォルダ一式を `INA226_Monitor-windows` というアーティファクトとして残します（保存期間 90 日）。
+
+### リリース（zip を GitHub Releases に添付）
+`v` で始まるタグを push すると、ビルドした `INA226_Monitor_v<版>.zip` が同じ名前のリリースに自動で添付されます。
+
+1. `ina226_monitor/__init__.py` の `__version__` を新しい版に書き換えてコミット・push する（例：`1.0.1`）。
+2. 同じ版のタグを付けて push する。
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+3. 数分後、GitHub の「Releases」に `INA226_Monitor v1.0.1` ができ、zip が添付されます。
+
+タグと `__version__` が一致しない場合は、リリースを作らずにエラーで止まります（TXT に記録される版とずれないようにするため）。
+同じタグでビルドをやり直した場合は、添付済みの zip を置き換えます。
 
 ## 構成
 ```

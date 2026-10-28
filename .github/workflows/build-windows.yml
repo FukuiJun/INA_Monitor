@@ -1,4 +1,5 @@
-# Windows でテストと exe ビルドを行い、フォルダ一式をアーティファクトとして残す
+# Windows でテストと exe ビルドを行い、フォルダ一式をアーティファクトとして残す。
+# v で始まるタグ（例：v1.0.0）を push したときは、zip を GitHub Releases に添付する。
 name: build-windows
 
 on:
@@ -9,6 +10,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write # Releases の作成に必要
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,8 +23,39 @@ jobs:
         run: python -m pytest -q
       - name: Build exe
         run: pyinstaller --noconfirm --clean INA226_Monitor.spec
+      - name: Zip
+        shell: pwsh
+        run: |
+          $ver = python -c "import ina226_monitor as m; print(m.__version__)"
+          $zip = "INA226_Monitor_v$ver.zip"
+          Compress-Archive -Force -Path dist\INA226_Monitor -DestinationPath $zip
+          "VERSION=$ver" >> $env:GITHUB_ENV
+          "ZIP=$zip" >> $env:GITHUB_ENV
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: INA226_Monitor-windows
           path: dist/INA226_Monitor
+
+      # ---- ここからタグを push したときだけ ----
+      - name: Check tag matches version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_name }}" -ne "v$env:VERSION") {
+            Write-Error "タグ ${{ github.ref_name }} と ina226_monitor/__init__.py の __version__ ($env:VERSION) が一致しません"
+            exit 1
+          }
+      - name: Attach zip to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG --title "INA226_Monitor $env:TAG" --generate-notes
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+          gh release upload $env:TAG $env:ZIP --clobber
