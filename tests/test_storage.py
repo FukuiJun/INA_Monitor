@@ -12,6 +12,7 @@ from ina226_monitor.storage import (
     build_txt,
     save_measurement,
 )
+from ina226_monitor import __version__
 from ina226_monitor.measurement import MeasurementData
 
 from .helpers import mock_data
@@ -88,7 +89,7 @@ def test_txt_content():
         "不正行数: 2",
         "積算電流量: 0.0000 mAh",
         "ゼロ点補正値: -0.103 mA",
-        "ソフトウェア: INA226_Monitor v1.0.0",
+        f"ソフトウェア: INA226_Monitor v{__version__}",
         "シャント抵抗: 0.080 Ω（Arduino スケッチ設定値）",
     ]
     assert lines[12:14] == ["", "[メモ]"]

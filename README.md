@@ -151,7 +151,7 @@ build.bat
 ```
 
 `.venv` を作って依存パッケージを入れ、テストを実行してから PyInstaller でビルドし、
-`dist\INA226_Monitor\`（フォルダ一式）と `INA226_Monitor_v1.0.0.zip` を作ります。
+`dist\INA226_Monitor\`（フォルダ一式）と `INA226_Monitor_v<版>.zip`（例：`INA226_Monitor_v1.1.0.zip`）を作ります。
 配布は zip を渡し、受け取った人は展開して `INA226_Monitor.exe` を起動します（インストール不要）。
 
 GitHub に push すると `.github/workflows/build-windows.yml` が Windows 上でテストとビルドを行い、
