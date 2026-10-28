@@ -1,0 +1,90 @@
+"""PNG 出力と、8 時間分（576,000 サンプル）の性能（AC-13 の自動テスト部分）。"""
+
+import time
+
+import numpy as np
+import pytest
+
+from ina226_monitor.decimate import minmax_decimate, visible_slice
+from ina226_monitor.storage import MeasurementInfo, build_note, build_title, save_measurement
+
+from .helpers import mock_data
+
+QtGui = pytest.importorskip("PySide6.QtGui")
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    app = QtGui.QGuiApplication.instance() or QtGui.QGuiApplication([])
+    yield app
+
+
+@pytest.fixture(scope="module")
+def big_data():
+    t0 = time.perf_counter()
+    d = mock_data(576_000)
+    print(f"\n576,000 サンプル生成+解析+積算: {time.perf_counter() - t0:.1f} s")
+    assert d.count == 576_000
+    return d
+
+
+def test_png_size_and_content(qapp, tmp_path):
+    from ina226_monitor.png_export import image_to_png_bytes, render_image
+
+    d = mock_data(2000)
+    img = render_image(d, "REG-U3 / MAIN-RevB", build_note(d))
+    assert (img.width(), img.height()) == (1600, 900)
+    png = image_to_png_bytes(img)
+    assert png.startswith(b"\x89PNG")
+    loaded = QtGui.QImage.fromData(png)
+    assert (loaded.width(), loaded.height()) == (1600, 900)
+
+
+def test_png_empty_data(qapp):
+    from ina226_monitor.measurement import MeasurementData
+    from ina226_monitor.png_export import render_image
+
+    img = render_image(MeasurementData(), "", "")
+    assert img.width() == 1600
+
+
+def test_decimate_keeps_peaks():
+    x = np.arange(100_000, dtype=float)
+    y = np.zeros_like(x)
+    y[54_321] = 500.0
+    y[77_777] = -20.0
+    xd, yd = minmax_decimate(x, y, 2000)
+    assert len(xd) <= 2000
+    assert yd.max() == 500.0 and yd.min() == -20.0
+    assert np.all(np.diff(xd) >= 0)
+
+
+def test_visible_slice():
+    x = np.arange(0, 100, 0.05)
+    s = visible_slice(x, 40.0, 50.0)
+    assert x[s][0] <= 40.0 and x[s][-1] >= 50.0
+    assert len(x[s]) <= 203
+
+
+def test_ac13_graph_update_under_half_second(big_data):
+    x = big_data.column("elapsed_s")
+    y = big_data.column("current_mA")
+    t0 = time.perf_counter()
+    for x0, x1 in [(0, x[-1]), (x[-1] - 60, x[-1]), (1000, 1300)]:
+        s = visible_slice(x, x0, x1)
+        minmax_decimate(x[s], y[s], 4000)
+    assert time.perf_counter() - t0 < 0.5
+
+
+def test_ac13_save_under_30_seconds(big_data, qapp, tmp_path):
+    from ina226_monitor.png_export import image_to_png_bytes, render_image
+
+    info = MeasurementInfo(target="REG-U3", memo="長時間")
+    t0 = time.perf_counter()
+    png = image_to_png_bytes(render_image(big_data, build_title(info), build_note(big_data)))
+    r = save_measurement(tmp_path, "big", big_data, info, True, png)
+    elapsed = time.perf_counter() - t0
+    print(f"576,000 サンプル保存: {elapsed:.1f} s")
+    assert elapsed < 30
+    with open(r.paths[0], "rb") as f:
+        assert sum(1 for _ in f) - 1 == 576_000  # 受信サンプル数と CSV 行数が一致

@@ -1,0 +1,27 @@
+# Windows でテストと exe ビルドを行い、フォルダ一式をアーティファクトとして残す
+name: build-windows
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -r requirements-dev.txt
+      - name: Test
+        run: python -m pytest -q
+      - name: Build exe
+        run: pyinstaller --noconfirm --clean INA226_Monitor.spec
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: INA226_Monitor-windows
+          path: dist/INA226_Monitor
