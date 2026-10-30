@@ -32,10 +32,17 @@ def minmax_decimate(x: np.ndarray, y: np.ndarray, max_points: int) -> tuple[np.n
     return xo, yo
 
 
-def zero_based_range(y: np.ndarray, pad_ratio: float = 0.05) -> tuple[float, float]:
+TOP_MARGIN_RATIO = 0.15  # 縦軸の上端の余白（表示範囲の幅に対する割合）
+BOTTOM_MARGIN_RATIO = 0.05  # マイナスの値があるときの下端の余白
+
+
+def zero_based_range(
+    y: np.ndarray, top_ratio: float = TOP_MARGIN_RATIO, bottom_ratio: float = BOTTOM_MARGIN_RATIO
+) -> tuple[float, float]:
     """縦軸の表示範囲。下端は 0（値がマイナスになるときだけ、その値より少し下まで広げる）。
 
-    上端はデータの最大値に少し余白を付ける。データが無い・すべて 0 のときは 0〜1。
+    上端はデータの最大値の上に余白を付けて、波形が枠に張り付かないようにする。
+    データが無い・すべて 0 のときは 0〜1。
     """
     if len(y) == 0:
         return 0.0, 1.0
@@ -45,7 +52,7 @@ def zero_based_range(y: np.ndarray, pad_ratio: float = 0.05) -> tuple[float, flo
     if span <= 0:
         return 0.0, 1.0
     if ymax > 0:
-        hi += span * pad_ratio
+        hi += span * top_ratio
     if ymin < 0:
-        lo -= span * pad_ratio
+        lo -= span * bottom_ratio
     return lo, hi

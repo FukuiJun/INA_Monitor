@@ -124,7 +124,7 @@ def test_100hz_8h_graph_and_save(qapp, tmp_path):
 
 def test_zero_based_range():
     """縦軸の下端は 0。マイナスの値があるときだけ下に広げる。"""
-    assert zero_based_range(np.array([3.6, 3.7])) == pytest.approx((0.0, 3.7 * 1.05))
+    assert zero_based_range(np.array([3.6, 3.7])) == pytest.approx((0.0, 3.7 * 1.15))  # 上に 15% の余白
     lo, hi = zero_based_range(np.array([-0.2, 5.0]))
     assert lo < -0.2 and hi > 5.0
     lo, hi = zero_based_range(np.array([-0.125, -0.094]))  # 無負荷でオフセットがマイナス
