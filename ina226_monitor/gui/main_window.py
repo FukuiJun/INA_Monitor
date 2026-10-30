@@ -54,7 +54,7 @@ from ..serial_io import PortOpenError, SerialReader, list_ports, open_port
 from ..settings import Settings
 from ..storage import MeasurementInfo, SaveError, build_note, build_title, save_measurement
 from ..zero_cal import ZeroCalError, ZeroCalFailure, collect_samples, compute_offset, format_offset
-from ..theme import mono_font, ui_font
+from ..theme import app_icon, mono_font, ui_font
 from .plot_panel import DEFAULT_RANGE, MODE_COMBINED, PlotPanel
 from .widgets import FitLabel, SaveOptionsDialog, divider, sub_label
 
@@ -109,6 +109,7 @@ class MainWindow(QMainWindow):
         self._window_before_stop: float | None = DEFAULT_RANGE
 
         self.setWindowTitle(f"{APP_NAME} v{__version__}")
+        self.setWindowIcon(app_icon())  # タイトルバー・タスクバーのアイコン
         self.resize(1280, 800)
         self.setMinimumSize(1024, 700)
         self._build_ui()

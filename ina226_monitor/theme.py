@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from string import Template
 
-from PySide6.QtGui import QFont
+import logging
 
-from .resources import STYLE_QSS, resource_path
+from PySide6.QtGui import QFont, QIcon
+
+from .resources import APP_ICON, APP_ICON_PNGS, STYLE_QSS, resource_path
 
 COLORS: dict[str, str] = {
     # 全体
@@ -94,6 +96,18 @@ def stylesheet() -> str:
     values["style_dir"] = qss.parent.as_posix()  # 矢印などの画像の場所
     text = qss.read_text(encoding="utf-8")
     return Template(text).substitute(values)
+
+
+def app_icon() -> QIcon:
+    """ウィンドウ・タスクバー用のアイコン。.ico に加えて PNG も入れ、どれかが読めれば表示できるようにする。"""
+    icon = QIcon()
+    for rel in (APP_ICON, *APP_ICON_PNGS):
+        path = resource_path(rel)
+        if path.is_file():
+            icon.addFile(str(path))
+    if icon.isNull():
+        logging.getLogger(__name__).warning("アプリのアイコンを読めません: %s", resource_path(APP_ICON))
+    return icon
 
 
 def apply(app) -> None:

@@ -21,14 +21,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
+APP_USER_MODEL_ID = f"FukuiJun.{APP_NAME}"
+
+
 def set_app_user_model_id() -> None:
-    """タスクバーに python.exe ではなくこのアプリのアイコンを出すための Windows の設定。"""
+    """タスクバーに python.exe ではなくこのアプリのアイコンを出すための Windows の設定。
+
+    ID に版を入れると、版が変わるたびに Windows が別のアプリとして扱い、
+    タスクバーにピン留めしたボタンと起動中のボタンが分かれてしまうので、版は入れない。
+    """
     if sys.platform != "win32":
         return
     try:
         import ctypes
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"FukuiJun.{APP_NAME}.{__version__}")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
     except Exception:
         pass
 
@@ -42,17 +49,15 @@ def main(argv: list[str] | None = None) -> int:
     set_app_user_model_id()
 
     from PySide6.QtCore import QTimer
-    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
 
     from .gui.main_window import MainWindow
-    from .resources import APP_ICON, resource_path
     from . import theme
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)
     theme.apply(app)
-    app.setWindowIcon(QIcon(str(resource_path(APP_ICON))))
+    app.setWindowIcon(theme.app_icon())
     mock = args.mock or args.mock_preload > 0
     win = MainWindow(paths, mock=mock, mock_speed=args.mock_speed)
     win.show()

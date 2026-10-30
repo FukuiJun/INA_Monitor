@@ -231,6 +231,17 @@ def test_theme_stylesheet_and_icon(qapp):
     icon = QIcon(str(resource_path(APP_ICON)))
     assert not icon.isNull()
     assert (256, 256) in [(s.width(), s.height()) for s in icon.availableSizes()]
+    # ウィンドウに付けるアイコンは .ico と PNG の両方から作る（どちらかが読めれば表示される）
+    sizes = [(s.width(), s.height()) for s in theme.app_icon().availableSizes()]
+    assert (16, 16) in sizes and (512, 512) in sizes
+
+
+def test_window_has_icon_and_stable_app_id(window):
+    from ina226_monitor import __version__
+    from ina226_monitor.app import APP_USER_MODEL_ID
+
+    assert not window.windowIcon().isNull()
+    assert __version__ not in APP_USER_MODEL_ID  # 版が変わってもタスクバーで同じアプリとして扱われる
 
 
 def test_zero_reset_from_context_menu(window, qapp):

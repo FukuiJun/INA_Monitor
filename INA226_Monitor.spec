@@ -7,6 +7,8 @@ a = Analysis(
     binaries=[],
     datas=[
         ("assets/app_icon.ico", "assets"),
+        ("assets/app_icon_256.png", "assets"),
+        ("assets/app_icon_512.png", "assets"),
         ("ina226_monitor/style/app.qss", "ina226_monitor/style"),
         ("ina226_monitor/style/arrow_down.png", "ina226_monitor/style"),
         ("ina226_monitor/style/arrow_down_disabled.png", "ina226_monitor/style"),
