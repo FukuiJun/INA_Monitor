@@ -48,11 +48,12 @@ def main(argv: list[str]) -> int:
     expected = ico_images(ico)
     embedded = set(exe_icon_images(exe))
     missing = [size for size, data in expected.items() if data not in embedded]
-    print(f"{exe.name}: アイコン画像 {len(embedded)} 個 / {ico.name}: {len(expected)} サイズ")
+    # Windows の CI はコンソールが cp1252 なので、出力は ASCII だけにする
+    print(f"{exe.name}: {len(embedded)} icon images / {ico.name}: {len(expected)} sizes")
     if missing:
-        print("埋め込まれていないサイズ: " + ", ".join(f"{w}x{h}" for w, h in sorted(missing)))
+        print("MISSING: " + ", ".join(f"{w}x{h}" for w, h in sorted(missing)))
         return 1
-    print("OK: " + ", ".join(f"{w}x{h}" for w, h in sorted(expected)) + " がすべて exe に入っています")
+    print("OK: all sizes embedded (" + ", ".join(f"{w}x{h}" for w, h in sorted(expected)) + ")")
     return 0
 
 
