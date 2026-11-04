@@ -13,6 +13,7 @@ from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
+    QGraphicsView,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -56,6 +57,9 @@ def _style_axis(ax: pg.AxisItem, text_color: str) -> None:
 def _make_plot(bottom_axis: pg.AxisItem | None = None) -> pg.PlotWidget:
     axis_items = {"bottom": bottom_axis} if bottom_axis is not None else None
     pw = pg.PlotWidget(background=COLORS["panel_bg"], axisItems=axis_items)
+    # pyqtgraph の既定（変わった所だけ描き直す）では、Windows の表示倍率によって
+    # 横一直線の波形（一定の電圧など）の一部が描かれずに残ることがあるので、毎回全体を描き直す
+    pw.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
     pi = pw.getPlotItem()
     pi.hideButtons()
     pi.setMenuEnabled(False)

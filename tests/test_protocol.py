@@ -1,3 +1,5 @@
+import pytest
+
 from ina226_monitor.measurement import MeasurementData
 from ina226_monitor.protocol import HEADER_LINE, LineKind, LineSplitter, parse_line
 
@@ -50,3 +52,12 @@ def test_splitter_keeps_partial_line_until_newline():
     assert s.feed(b"188002,0.00") == []
     assert s.feed(b"00,-10.0,-0.125\r\n1880") == ["188002,0.0000,-10.0,-0.125"]
     assert s.feed(b"52,0.0000,-7.5,-0.094\r\n") == ["188052,0.0000,-7.5,-0.094"]
+
+
+def test_current_matches_80_milliohm_shunt():
+    """current_mA はシャント電圧 / 80 mΩ（µV / Ω = µA → /1000 で mA）。仕様 5.1 の実データで確認。"""
+    for line in SAMPLE:
+        r = parse_line(line).row
+        assert r.current_mA == pytest.approx(r.shunt_uV / 0.080 / 1000, abs=0.0005)  # 小数 3 桁に丸めた分
+    # INA226 のシャント電圧 1 LSB = 2.5 µV → 2.5 µV / 0.080 Ω = 31.25 µA
+    assert parse_line("0,0.0,-7.5,-0.094").row.current_mA - parse_line("0,0.0,-10.0,-0.125").row.current_mA == pytest.approx(0.031)
