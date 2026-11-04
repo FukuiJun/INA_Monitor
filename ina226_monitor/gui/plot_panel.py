@@ -142,6 +142,8 @@ class PlotPanel(QFrame):
         top = QHBoxLayout()
         self.title_label = QLabel()
         self.title_label.setObjectName("currentAxisLabel")
+        # 見出しは縦軸の数値欄の右、グラフの描画領域の左端にそろえる
+        self.title_label.setContentsMargins(LEFT_AXIS_WIDTH, 0, 0, 0)
         self.title_label.setFont(ui_font(12, bold=True))
         top.addWidget(self.title_label)
         top.addStretch(1)
@@ -179,6 +181,8 @@ class PlotPanel(QFrame):
         sl.addWidget(self.pw_cur, 3)  # 電流グラフは電圧グラフの約 1.5 倍の高さ
         vol_label = QLabel("電圧 [V]")
         vol_label.setObjectName("voltageAxisLabel")
+        vol_label.setContentsMargins(LEFT_AXIS_WIDTH, 0, 0, 0)
+        self.vol_label = vol_label
         vol_label.setFont(ui_font(12, bold=True))
         sl.addWidget(vol_label)
         sl.addWidget(self.pw_vol, 2)

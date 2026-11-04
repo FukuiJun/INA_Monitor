@@ -384,3 +384,12 @@ def test_tick_font_is_larger(qapp):
     assert TICK_FONT_PX >= 13
     for ax in (p.p_cur.getAxis("left"), p.p_vol.getAxis("bottom"), p.p_comb.getAxis("right")):
         assert ax.style["tickFont"].pixelSize() == TICK_FONT_PX
+
+
+def test_axis_titles_align_with_plot_area(qapp):
+    """「電流 [mA]」「電圧 [V]」の見出しは縦軸の数値欄の右（描画領域の左端）から始める。"""
+    from ina226_monitor.gui.plot_panel import LEFT_AXIS_WIDTH, PlotPanel
+
+    p = PlotPanel()
+    for label in (p.title_label, p.vol_label):
+        assert label.contentsMargins().left() == LEFT_AXIS_WIDTH
