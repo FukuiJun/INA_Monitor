@@ -104,3 +104,18 @@ def parse_interval_ack(text: str) -> tuple[int, int] | None:
 def interval_label(ms: int) -> str:
     hz = 1000 / ms
     return f"{ms} ms（{hz:g} Hz）"
+
+
+# スケッチが起動時に出す名乗り（周期変更に対応した版だけが出す）
+FIRMWARE_VERSION = 2
+_BANNER_RE = re.compile(r"^#\s*ina226_logger\s+fw=(\d+)\b")
+
+
+def firmware_banner() -> str:
+    return f"# ina226_logger fw={FIRMWARE_VERSION}"
+
+
+def parse_firmware_banner(text: str) -> int | None:
+    """`# ina226_logger fw=2` から版を取り出す。名乗りでなければ None。"""
+    m = _BANNER_RE.match(text.strip())
+    return int(m.group(1)) if m else None

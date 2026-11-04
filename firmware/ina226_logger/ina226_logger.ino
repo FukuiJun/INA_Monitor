@@ -6,6 +6,7 @@
 // 応答:
 //   # interval_ms=<ms> avg=<平均回数>
 //   # error: <内容>
+// 起動時に「# ina226_logger fw=2」と名乗る（PC 側はこれで周期変更に対応した版だと分かる）。
 // リセット直後は 50 ms（平均 16 回）。データ行の形式は周期によらず同じ。
 
 #include <Wire.h>
@@ -115,6 +116,7 @@ void pollCommand() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
+  Serial.println(F("# ina226_logger fw=2"));
   Wire.begin();
 
   scanI2C();

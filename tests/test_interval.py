@@ -124,3 +124,70 @@ def test_reader_sends_interval_after_every_header():
 def test_reader_without_interval_sends_nothing():
     lines = run_reader(MockProfile(invalid_every_s=None), None, 0.6)
     assert not any(parse_interval_ack(p.text) for p in lines)
+
+
+def test_firmware_banner():
+    from ina226_monitor.protocol import firmware_banner, parse_firmware_banner
+
+    assert parse_firmware_banner(firmware_banner()) == 2
+    assert parse_firmware_banner("# ina226_logger fw=2") == 2
+    assert parse_firmware_banner("# I2C scan...") is None
+    # 新しいスケッチ（模擬）は名乗り、古いスケッチは名乗らない
+    new = [x for _, x in __import__("itertools").islice(
+        __import__("ina226_monitor.mock_serial", fromlist=["mock_events"]).mock_events(MockProfile()), 5)]
+    old = [x for _, x in __import__("itertools").islice(
+        __import__("ina226_monitor.mock_serial", fromlist=["mock_events"]).mock_events(MockProfile(ignore_commands=True)), 5)]
+    assert firmware_banner() in new and firmware_banner() not in old
+
+
+class DropFirstWrite(MockSerial):
+    """最初の送信だけ届かないポート（Arduino が受け取り損ねた場合）。"""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.writes = 0
+
+    def write(self, data):
+        self.writes += 1
+        if self.writes == 1:
+            return len(data)
+        return super().write(data)
+
+
+def test_reader_resends_when_no_ack():
+    q = queue.Queue()
+    port = DropFirstWrite(MockProfile(invalid_every_s=None), speed=5.0)
+    reader = SerialReader(port, q, interval_ms=20)
+    reader.start()
+    time.sleep(1.8)
+    reader.stop()
+    lines = [ev[1] for ev in list(q.queue) if ev[0] == "line"]
+    assert port.writes >= 2
+    assert any(parse_interval_ack(p.text) == (20, 4) for p in lines)
+    assert not any(ev[0] == "interval_no_ack" for ev in list(q.queue))
+
+
+def test_reader_gives_up_on_old_sketch():
+    q = queue.Queue()
+    port = MockSerial(MockProfile(ignore_commands=True, invalid_every_s=None), speed=5.0)
+    reader = SerialReader(port, q, interval_ms=20)
+    reader.start()
+    time.sleep(3.6)
+    reader.stop()
+    events = list(q.queue)
+    assert sum(1 for ev in events if ev[0] == "interval_no_ack") == 1
+
+
+def test_reader_sends_to_board_that_does_not_reset():
+    """ポートを開いてもリセットされないボード：ヘッダ行が来なくてもデータが届けば送る。"""
+    q = queue.Queue()
+    port = MockSerial(MockProfile(reset_on_open=False, invalid_every_s=None), speed=1.0)
+    reader = SerialReader(port, q, interval_ms=20)
+    reader.start()
+    time.sleep(3.3)
+    reader.stop()
+    lines = [ev[1] for ev in list(q.queue) if ev[0] == "line"]
+    assert not any(p.kind is LineKind.HEADER for p in lines)
+    assert any(parse_interval_ack(p.text) == (20, 4) for p in lines)
+    t = [p.row.time_ms for p in lines if p.kind is LineKind.DATA][-10:]
+    assert {b - a for a, b in zip(t, t[1:])} <= {20, 21}

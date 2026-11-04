@@ -9,12 +9,16 @@ import time
 from dataclasses import dataclass
 
 from .mock_serial import MockProfile, MockSerial
-from .protocol import LineKind, LineSplitter, interval_command, parse_line
+from .protocol import LineKind, LineSplitter, interval_command, parse_interval_ack, parse_line
 from .zero_cal import STARTUP_DISCARD_S
 
 log = logging.getLogger(__name__)
 
 BAUDRATE = 115200
+
+INTERVAL_RETRY_S = 1.0  # 周期変更の応答を待つ時間（これを過ぎたら送り直す）
+INTERVAL_MAX_TRIES = 3
+NO_HEADER_SEND_S = 2.5  # 開いてからこの時間ヘッダ行が来ずにデータだけ届いたら、リセットされないボードとみなす
 
 # 模擬シリアル（--mock 起動時だけ一覧に出す）
 MOCK_PORTS: dict[str, tuple[str, MockProfile]] = {
@@ -23,6 +27,7 @@ MOCK_PORTS: dict[str, tuple[str, MockProfile]] = {
     "MOCK3": ("模擬データ（20 秒後に USB 抜け）", MockProfile(disconnect_after_s=20.0)),
     "MOCK4": ("模擬データ（30 秒ごとにリセット）", MockProfile(reset_every_s=30.0)),
     "MOCK5": ("模擬データ（周期を変えられない古いスケッチ）", MockProfile(ignore_commands=True)),
+    "MOCK6": ("模擬データ（ポートを開いてもリセットされないボード）", MockProfile(reset_on_open=False)),
 }
 
 
@@ -92,11 +97,14 @@ def open_port(device: str, mock_speed: float = 1.0):
 class SerialReader(threading.Thread):
     """受信・行判定を行い、結果をキューに入れる。
 
-    interval_ms を指定すると、ヘッダ行（Arduino の起動・リセット直後に出る）を受けるたびに
-    周期変更コマンドを送る（仕様 F-13）。
+    interval_ms を指定すると、周期変更コマンドを送る（仕様 F-13）。
+      - ヘッダ行（Arduino の起動・リセット直後に出る）を受けるたびに送る
+      - ヘッダ行が来ないままデータが届く（ポートを開いてもリセットされないボード）ときも送る
+      - 応答が無ければ INTERVAL_RETRY_S ごとに送り直し、INTERVAL_MAX_TRIES 回で諦める
 
     キューに入るもの：
       ("line", ParsedLine, pc_time)  … 判定済みの 1 行（pc_time は受信時の PC 時刻）
+      ("interval_no_ack",)           … 何度送っても周期変更の応答が無かった
       ("disconnected", message)      … 読み込みで例外（USB 抜けなど）。スレッドは終わる
     """
 
@@ -107,6 +115,13 @@ class SerialReader(threading.Thread):
         self.interval_ms = interval_ms
         self._clock = clock
         self._stop_event = threading.Event()
+        # 周期変更コマンドの送信状態
+        self._tries = 0
+        self._last_send = 0.0
+        self._acked = False
+        self._gave_up = False
+        self._header_seen = False
+        self._data_seen = False
 
     def run(self) -> None:
         splitter = LineSplitter()
@@ -120,24 +135,56 @@ class SerialReader(threading.Thread):
                         log.warning("受信中に接続が切れました: %s", e)
                         self.out.put(("disconnected", str(e)))
                     return
-                if not chunk:
-                    continue
-                pc_time = time.time()
-                for line in splitter.feed(chunk):
-                    parsed = parse_line(line)
-                    # 開いた直後の行は Arduino のリセット前の残りかもしれないので捨てる
-                    if parsed.kind is LineKind.DATA and self._clock() - t_open < STARTUP_DISCARD_S:
-                        continue
-                    self.out.put(("line", parsed, pc_time))
-                    if parsed.kind is LineKind.HEADER and self.interval_ms is not None:
-                        self._send_interval()
+                if chunk:
+                    pc_time = time.time()
+                    for line in splitter.feed(chunk):
+                        parsed = parse_line(line)
+                        # 開いた直後の行は Arduino のリセット前の残りかもしれないので捨てる
+                        if parsed.kind is LineKind.DATA and self._clock() - t_open < STARTUP_DISCARD_S:
+                            continue
+                        self.out.put(("line", parsed, pc_time))
+                        self._on_line(parsed)
+                if self.interval_ms is not None:
+                    self._interval_step(self._clock() - t_open)
         finally:
             try:
                 self.port.close()
             except Exception:
                 pass
 
+    def _on_line(self, parsed) -> None:
+        if parsed.kind is LineKind.HEADER:
+            # 起動・リセットのたびに既定の周期に戻るので、最初から送り直す
+            self._header_seen = True
+            self._acked = False
+            self._gave_up = False
+            self._tries = 0
+            if self.interval_ms is not None:
+                self._send_interval()
+        elif parsed.kind is LineKind.COMMENT and parse_interval_ack(parsed.text):
+            self._acked = True
+        elif parsed.kind is LineKind.DATA:
+            self._data_seen = True
+
+    def _interval_step(self, since_open: float) -> None:
+        if self._acked or self._gave_up:
+            return
+        now = self._clock()
+        if self._tries == 0:
+            # ヘッダ行が来ないままデータが届いている＝リセットされないボード
+            if not self._header_seen and self._data_seen and since_open >= NO_HEADER_SEND_S:
+                self._send_interval()
+        elif now - self._last_send >= INTERVAL_RETRY_S:
+            if self._tries < INTERVAL_MAX_TRIES:
+                self._send_interval()
+            else:
+                self._gave_up = True
+                log.warning("周期変更の応答がありません（%d ms、%d 回送信）", self.interval_ms, self._tries)
+                self.out.put(("interval_no_ack",))
+
     def _send_interval(self) -> None:
+        self._tries += 1
+        self._last_send = self._clock()
         try:
             self.port.write(interval_command(self.interval_ms))
         except Exception as e:  # 送れなくても受信は続ける（周期は既定のまま）

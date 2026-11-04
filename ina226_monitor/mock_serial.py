@@ -12,7 +12,7 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from .protocol import DEFAULT_INTERVAL_MS, MAX_INTERVAL_MS, MIN_INTERVAL_MS
+from .protocol import DEFAULT_INTERVAL_MS, MAX_INTERVAL_MS, MIN_INTERVAL_MS, firmware_banner
 
 SHUNT_OHM = 0.080
 INA226_OFFSET_MA = -0.1  # 無負荷でも出るオフセット（実機と同程度）
@@ -25,7 +25,8 @@ class MockProfile:
     reset_every_s: float | None = None  # Arduino のリセットを模擬する間隔
     disconnect_after_s: float | None = None  # USB 抜けを模擬する時刻
     invalid_every_s: float | None = 30.0  # 途中で切れた行を混ぜる間隔
-    ignore_commands: bool = False  # True なら周期変更コマンドに応答しない古いスケッチ
+    ignore_commands: bool = False  # True なら周期変更コマンドに応答しない古いスケッチ（名乗りも出さない）
+    reset_on_open: bool = True  # False ならポートを開いてもリセットされないボード（途中のデータから届く）
     seed: int = 1
 
 
@@ -85,12 +86,22 @@ def mock_events(
     rng = random.Random(profile.seed)
     seg_start = 0.0  # Arduino 起動時刻（ポートを開いた時刻からの秒）
     next_invalid = profile.invalid_every_s
+    first = True
     while True:
         state.interval_ms = DEFAULT_INTERVAL_MS  # リセットで既定の周期に戻る
-        t = seg_start + profile.reset_delay_s
-        for line in ("# I2C scan...", "#  found 0x41", "time_ms,bus_V,shunt_uV,current_mA"):
-            yield t, line
-        time_ms = int(profile.reset_delay_s * 1000)
+        if first and not profile.reset_on_open:
+            # 開く前から動いている：起動時の行は出さず、途中のデータから届く
+            seg_start = -60.0
+            time_ms = 60_000
+        else:
+            t = seg_start + profile.reset_delay_s
+            startup = ["# I2C scan...", "#  found 0x41", "time_ms,bus_V,shunt_uV,current_mA"]
+            if not profile.ignore_commands:
+                startup.insert(0, firmware_banner())
+            for line in startup:
+                yield t, line
+            time_ms = int(profile.reset_delay_s * 1000)
+        first = False
         while True:
             time_ms += state.interval_ms + (1 if rng.random() < 0.1 else 0)
             t = seg_start + time_ms / 1000.0

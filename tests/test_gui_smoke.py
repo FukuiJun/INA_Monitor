@@ -417,3 +417,41 @@ def test_axis_titles_align_with_plot_area(qapp):
     p.set_mode(MODE_COMBINED)
     qapp.processEvents()
     assert p.title_label.contentsMargins().left() == p.p_comb.getAxis("left").width()
+
+
+def test_change_interval_after_a_measurement(window, qapp):
+    """50 ms で測定 → 停止 → 10 ms に変えて再び測定、で周期が変わる（警告は出ない）。"""
+    from ina226_monitor.gui.main_window import MSG_NO_ACK, MSG_OLD_SKETCH
+
+    w = window
+    select(w, "MOCK1")
+    select_interval(w, 50)
+    w.on_start()
+    wait(qapp, 0.8)
+    assert w.firmware_version == 2
+    w.on_stop()
+    w.unsaved = False
+    select_interval(w, 10)
+    w.on_start()
+    wait(qapp, 1.0)
+    assert w.interval_ack == (10, 4)
+    assert w.msg_label.text() not in (MSG_OLD_SKETCH, MSG_NO_ACK)
+    w.on_stop()
+
+
+def test_no_ack_message_depends_on_banner(window):
+    """名乗りがあるのに応答が無い／名乗りが無い（古いスケッチ）でメッセージを分ける。50 ms なら何も出さない。"""
+    from ina226_monitor.gui.main_window import MSG_NO_ACK, MSG_OLD_SKETCH
+
+    w = window
+    w.interval_requested = 10
+    w.firmware_version = None
+    w._on_interval_no_ack()
+    assert w.msg_label.text() == MSG_OLD_SKETCH
+    w._on_comment("# ina226_logger fw=2")
+    w._on_interval_no_ack()
+    assert w.msg_label.text() == MSG_NO_ACK
+    w.set_message("x")
+    w.interval_requested = 50
+    w._on_interval_no_ack()
+    assert w.msg_label.text() == "x"

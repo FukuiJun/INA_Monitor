@@ -46,6 +46,7 @@ from ..protocol import (
     INTERVAL_CHOICES_MS,
     LineKind,
     interval_label,
+    parse_firmware_banner,
     parse_interval_ack,
     parse_line,
 )
@@ -63,14 +64,17 @@ log = logging.getLogger(__name__)
 UPDATE_INTERVAL_MS = 200
 TMP_FLUSH_INTERVAL_MS = 60_000
 NO_DATA_TIMEOUT_S = 5.0
-INTERVAL_ACK_TIMEOUT_S = 3.0  # ヘッダ行のあと、周期変更の応答を待つ時間
 DEFAULT_AVG = 16  # 既定周期（50 ms）でのスケッチの平均回数
 INFO_MAX_LEN = 30
 LEFT_PANEL_WIDTH = 320
 
 MSG_NO_PORT = "Arduino が見つかりません。USB の接続を確認してください"
 MSG_UNSAVED = "保存されていないデータがあります。保存しますか？"
-MSG_OLD_SKETCH = "Arduino のスケッチが古いため周期を変更できません（firmware を書き込み直してください）"
+MSG_OLD_SKETCH = (
+    "Arduino のスケッチが周期変更に対応していません。50 ms で測定を続けます"
+    "（firmware/ina226_logger を書き込み直してください）"
+)
+MSG_NO_ACK = "Arduino が周期変更に応答しませんでした。50 ms で測定を続けます"
 
 
 class State(Enum):
@@ -105,7 +109,7 @@ class MainWindow(QMainWindow):
         self._no_data_shown = False
         self.interval_requested = DEFAULT_INTERVAL_MS  # 今回の測定で Arduino に頼んだ周期
         self.interval_ack: tuple[int, int] | None = None  # Arduino の応答 (周期 ms, 平均回数)
-        self._ack_wait_since: float | None = None  # ヘッダ行を受けて応答を待ち始めた時刻
+        self.firmware_version: int | None = None  # スケッチの名乗り（# ina226_logger fw=N）
         self._window_before_stop: float | None = DEFAULT_RANGE
 
         self.setWindowTitle(f"{APP_NAME} v{__version__}")
@@ -540,7 +544,7 @@ class MainWindow(QMainWindow):
         self._no_data_shown = False
         self.interval_requested = self.interval_combo.currentData()
         self.interval_ack = None
-        self._ack_wait_since = None
+        self.firmware_version = None
 
         self.rx_queue = queue.Queue()
         self.reader = SerialReader(port, self.rx_queue, interval_ms=self.interval_requested)
@@ -576,32 +580,37 @@ class MainWindow(QMainWindow):
                 elif parsed.kind is LineKind.COMMENT:
                     self._on_comment(parsed.text)
                 elif parsed.kind is LineKind.HEADER:
-                    # Arduino が起動・リセットした。受信スレッドが周期変更を送ったので応答を待つ
-                    self._ack_wait_since = time.monotonic()
+                    # Arduino が起動・リセットして既定の周期に戻った。受信スレッドが周期変更を送り直す
+                    self.interval_ack = None
                 elif parsed.kind is LineKind.INVALID:
                     d.invalid_count += 1
+            elif ev[0] == "interval_no_ack":
+                self._on_interval_no_ack()
             elif ev[0] == "disconnected":
                 disconnected = ev[1]
         return reset, disconnected
 
     def _on_comment(self, text: str) -> None:
+        fw = parse_firmware_banner(text)
+        if fw is not None:
+            self.firmware_version = fw
         ack = parse_interval_ack(text)
         if ack is not None:
             self.interval_ack = ack
-            self._ack_wait_since = None
             self.set_message(f"サンプリング周期 {ack[0]} ms（INA226 平均 {ack[1]} 回）で測定しています")
             return
         if text.startswith("# error"):
             log.warning("Arduino からのエラー: %s", text)
         self.set_message(text)
 
-    def _check_interval_ack(self) -> None:
-        if self._ack_wait_since is None or time.monotonic() - self._ack_wait_since < INTERVAL_ACK_TIMEOUT_S:
-            return
-        self._ack_wait_since = None
-        if self.interval_ack is None and self.interval_requested != DEFAULT_INTERVAL_MS:
-            log.warning("周期変更の応答がありません（%s, %d ms）", self._device, self.interval_requested)
-            self.set_message(MSG_OLD_SKETCH)
+    def _on_interval_no_ack(self) -> None:
+        """受信スレッドが何度送っても周期変更の応答が無かった。"""
+        if self.interval_requested == DEFAULT_INTERVAL_MS:
+            return  # 既定の 50 ms のままなので困らない（古いスケッチでも 50 ms で動いている）
+        # 名乗りがあれば対応版なのに応答が無かった、無ければ周期変更に対応していない古いスケッチ
+        msg = MSG_NO_ACK if self.firmware_version is not None else MSG_OLD_SKETCH
+        log.warning("%s（%s, %d ms, fw=%s）", msg, self._device, self.interval_requested, self.firmware_version)
+        self.set_message(msg)
 
     def _tick(self) -> None:
         if self.state is not State.MEASURING:
@@ -618,7 +627,6 @@ class MainWindow(QMainWindow):
             self._no_data_shown = True
             log.warning("データが届いていません（%s）", self._device)
             self.set_message("データが届いていません")
-        self._check_interval_ack()
         self._check_tmp_status()
         self._update_numbers()
         self.plot.refresh()
