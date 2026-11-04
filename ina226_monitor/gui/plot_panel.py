@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer, Signal
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -31,7 +32,9 @@ from ..theme import COLORS, CURRENT_LINE_WIDTH, VOLTAGE_LINE_WIDTH, mono_font, u
 RANGES = [("10秒", 10.0), ("60秒", 60.0), ("300秒", 300.0), ("全体", None)]
 DEFAULT_RANGE = 60.0
 MAX_DRAW_POINTS = 4000
-LEFT_AXIS_WIDTH = 62
+LEFT_AXIS_WIDTH = 62  # 縦軸の数値欄の幅の初期値（描画のたびに数値に合わせて詰める）
+AXIS_MIN_WIDTH = 24
+AXIS_TEXT_GAP = 9  # 数値と描画領域のあいだ（pyqtgraph の tickTextOffset 5px + 余裕）
 TICK_FONT_PX = 13  # 目盛りの数値の文字の大きさ
 ZERO_LABEL_MARGIN = 0.06  # 下端 0 の目盛りを見せるための余白（縦軸の幅に対する割合）
 
@@ -338,3 +341,40 @@ class PlotPanel(QFrame):
             xd, yd = minmax_decimate(xs, y, MAX_DRAW_POINTS)
             curve.setData(xd, yd)
             vb.setYRange(*_screen_y_range(y), padding=0.0)
+        self._fit_axis_widths()
+
+    def _axis_text_width(self, ax: pg.AxisItem, vb: pg.ViewBox) -> int:
+        """今の縦軸の範囲で表示される目盛りの数値のうち、いちばん長いものの幅（px）。"""
+        lo, hi = vb.viewRange()[1]
+        levels = ax.tickValues(lo, hi, max(vb.height(), 1.0))
+        if not levels:
+            return 0
+        spacing, values = levels[0]  # 主目盛りだけ表示している
+        fm = QFontMetrics(ax.style["tickFont"])
+        return max((fm.horizontalAdvance(t) for t in ax.tickStrings(values, ax.scale, spacing)), default=0)
+
+    def _fit_axis_widths(self) -> None:
+        """縦軸の数値欄を数値の長さに合わせて詰め、左側の無駄な余白をなくす。
+
+        2 段表示では上下のグラフの左端がそろうよう、2 つの縦軸を同じ幅にする。
+        見出しも描画領域の左端にそろえる。
+        """
+        def width(text_w: int) -> int:
+            return max(AXIS_MIN_WIDTH, text_w + AXIS_TEXT_GAP)
+
+        if self._mode == MODE_COMBINED:
+            left = width(self._axis_text_width(self.p_comb.getAxis("left"), self.p_comb.getViewBox()))
+            right = width(self._axis_text_width(self.p_comb.getAxis("right"), self.vb_comb_cur))
+            axes = ((self.p_comb.getAxis("left"), left), (self.p_comb.getAxis("right"), right))
+        else:
+            left = width(max(
+                self._axis_text_width(self.p_cur.getAxis("left"), self.p_cur.getViewBox()),
+                self._axis_text_width(self.p_vol.getAxis("left"), self.p_vol.getViewBox()),
+            ))
+            axes = ((self.p_cur.getAxis("left"), left), (self.p_vol.getAxis("left"), left))
+        for ax, w in axes:
+            if ax.width() != w:
+                ax.setWidth(w)
+        for label in (self.title_label, self.vol_label):
+            if label.contentsMargins().left() != left:
+                label.setContentsMargins(left, 0, 0, 0)

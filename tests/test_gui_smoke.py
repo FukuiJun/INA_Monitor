@@ -387,9 +387,33 @@ def test_tick_font_is_larger(qapp):
 
 
 def test_axis_titles_align_with_plot_area(qapp):
-    """「電流 [mA]」「電圧 [V]」の見出しは縦軸の数値欄の右（描画領域の左端）から始める。"""
-    from ina226_monitor.gui.plot_panel import LEFT_AXIS_WIDTH, PlotPanel
+    """縦軸の数値欄は数値に合わせて詰め、見出しは描画領域の左端（数値欄の右）にそろえる。"""
+    from ina226_monitor.gui.plot_panel import LEFT_AXIS_WIDTH, MODE_COMBINED, PlotPanel
+    from ina226_monitor.measurement import MeasurementData
 
     p = PlotPanel()
+    p.resize(900, 600)
+    p.show()
+    d = MeasurementData()
+    for i in range(200):
+        d.add(i * 50, 3.7, 20.0 + (i % 40), i * 0.05)
+    p.set_data(d, live=False)
+    p.set_window(None)
+    qapp.processEvents()
+    w_cur = p.p_cur.getAxis("left").width()
+    assert w_cur == p.p_vol.getAxis("left").width()  # 上下の左端がそろう
+    assert w_cur < LEFT_AXIS_WIDTH  # 「60」程度の数値なら固定幅より狭くなる
     for label in (p.title_label, p.vol_label):
-        assert label.contentsMargins().left() == LEFT_AXIS_WIDTH
+        assert label.contentsMargins().left() == w_cur
+
+    # 桁の多い数値（-0.125 など）では広がる
+    neg = MeasurementData()
+    for i in range(200):
+        neg.add(i * 50, 3.7, -0.125 + 0.031 * (i % 2), i * 0.05)
+    p.set_data(neg, live=False)
+    qapp.processEvents()
+    assert p.p_cur.getAxis("left").width() > w_cur
+
+    p.set_mode(MODE_COMBINED)
+    qapp.processEvents()
+    assert p.title_label.contentsMargins().left() == p.p_comb.getAxis("left").width()
