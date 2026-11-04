@@ -337,3 +337,50 @@ def test_y_axis_starts_at_zero_and_combined_mode(window, qapp, tmp_path):
     w2.plot.set_mode(MODE_SPLIT)
     assert w2.plot.stack.currentIndex() == 0
     w2.close()
+
+
+def test_live_paging_and_centering(qapp):
+    """測定中：右端に着いたら左端から描き直す。時間幅を変えたら最新の値を画面の中央にする。"""
+    from ina226_monitor.gui.plot_panel import PlotPanel
+    from ina226_monitor.measurement import MeasurementData
+
+    p = PlotPanel()
+    d = MeasurementData()
+    p.set_data(d, live=True)
+    p.set_window(10.0)
+    t = {"i": 0}
+
+    def run_to(seconds):
+        while t["i"] * 0.05 <= seconds + 1e-9:
+            d.add(t["i"] * 50, 3.7, 10.0, t["i"] * 0.05)
+            t["i"] += 1
+        p.refresh()
+        return tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0])
+
+    assert run_to(9.9) == (0.0, 10.0)
+    assert run_to(10.05) == (10.0, 20.0)  # 右端に着いたら次のページ（左端から）
+    assert run_to(19.95) == (10.0, 20.0)
+    assert run_to(25.0) == (20.0, 30.0)
+
+    p.set_window(10.0)  # 同じ幅を選び直しても中央から
+    assert tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0]) == (20.0, 30.0)
+    p.set_window(60.0)  # 25 s で 60 秒幅 → 中央は 30 s だが 0 より前は出さない
+    assert tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0]) == (0.0, 60.0)
+    assert run_to(40.0) == (0.0, 60.0)
+    p.set_window(10.0)  # 40 s で 10 秒幅 → 35〜45 s（最新が中央）
+    assert tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0]) == (35.0, 45.0)
+    assert run_to(45.05) == (45.0, 55.0)
+
+    p.set_live(False)  # 停止後は最後の値が右端
+    p.set_window(10.0)
+    lo, hi = p.p_cur.getViewBox().viewRange()[0]
+    assert hi == pytest.approx(d.last_elapsed_s) and hi - lo == pytest.approx(10.0)
+
+
+def test_tick_font_is_larger(qapp):
+    from ina226_monitor.gui.plot_panel import TICK_FONT_PX, PlotPanel
+
+    p = PlotPanel()
+    assert TICK_FONT_PX >= 13
+    for ax in (p.p_cur.getAxis("left"), p.p_vol.getAxis("bottom"), p.p_comb.getAxis("right")):
+        assert ax.style["tickFont"].pixelSize() == TICK_FONT_PX

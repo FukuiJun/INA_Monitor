@@ -1,5 +1,7 @@
 """リアルタイムグラフ（仕様 F-03・7.1）。
 
+測定中の表示はページ送り：波形が右端に着いたら次の時間幅に切り替え、左端から描き直す。
+
 表示モードは 2 つ：
   - 2 段（split）  ：上に電流 mA、下に電圧 V。横軸は共通
   - まとめて（combined）：1 つのグラフに、左軸 電圧 V・右軸 電流 mA
@@ -29,7 +31,8 @@ from ..theme import COLORS, CURRENT_LINE_WIDTH, VOLTAGE_LINE_WIDTH, mono_font, u
 RANGES = [("10秒", 10.0), ("60秒", 60.0), ("300秒", 300.0), ("全体", None)]
 DEFAULT_RANGE = 60.0
 MAX_DRAW_POINTS = 4000
-LEFT_AXIS_WIDTH = 52
+LEFT_AXIS_WIDTH = 62
+TICK_FONT_PX = 13  # 目盛りの数値の文字の大きさ
 ZERO_LABEL_MARGIN = 0.06  # 下端 0 の目盛りを見せるための余白（縦軸の幅に対する割合）
 
 MODE_SPLIT = "split"
@@ -42,15 +45,21 @@ class SecondsAxis(pg.AxisItem):
 
     def tickStrings(self, values, scale, spacing):
         strs = super().tickStrings(values, scale, spacing)
-        if strs:
-            strs[-1] = f"{strs[-1]} s"
+        if not strs:
+            return strs
+        # 右端ちょうどの目盛りは表示されないので、その手前の目盛りに単位を付ける
+        lo, hi = sorted(self.range)
+        margin = (hi - lo) * 0.02
+        inside = [i for i, v in enumerate(values) if v * scale < hi - margin]
+        i = inside[-1] if inside else len(strs) - 1
+        strs[i] = f"{strs[i]} s"
         return strs
 
 
 def _style_axis(ax: pg.AxisItem, text_color: str) -> None:
     ax.setPen(pg.mkPen(COLORS["graph_grid"]))
     ax.setTextPen(pg.mkPen(text_color))
-    ax.setStyle(tickFont=mono_font(11), tickLength=0, maxTickLevel=0)  # 主目盛りだけ
+    ax.setStyle(tickFont=mono_font(TICK_FONT_PX), tickLength=0, maxTickLevel=0)  # 主目盛りだけ
     ax.setTickDensity(0.6)
 
 
@@ -123,6 +132,7 @@ class PlotPanel(QFrame):
         self._mode = MODE_SPLIT
         self._drawn_key = None
         self._setting_range = False
+        self._page_start = 0.0  # 測定中の表示の左端（経過秒）
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 10, 14, 10)
@@ -210,6 +220,7 @@ class PlotPanel(QFrame):
     def set_data(self, data: MeasurementData | None, live: bool) -> None:
         self._data = data
         self._live = live
+        self._page_start = 0.0
         self._drawn_key = None
         self.refresh()
 
@@ -219,6 +230,10 @@ class PlotPanel(QFrame):
     def set_window(self, seconds: float | None) -> None:
         self._window = seconds
         self.range_buttons[seconds].setChecked(True)
+        if self._live and seconds is not None:
+            # 測定中に時間幅を変えたら、最新の値が画面の中央に来るようにして、そこから右へ描き進める
+            t_last = self._data.last_elapsed_s if self._data is not None and self._data.count else 0.0
+            self._page_start = max(0.0, t_last - seconds / 2)
         self._drawn_key = None
         self.refresh()
 
@@ -251,7 +266,14 @@ class PlotPanel(QFrame):
         t_last = d.last_elapsed_s
         if self._window is None:
             x0, x1 = 0.0, max(t_last, 1.0)
+        elif self._live:
+            # ページ送り：波形が右端に着いたら、次の時間幅に切り替えて左端から描き直す
+            while t_last >= self._page_start + self._window:
+                self._page_start += self._window
+            x0 = self._page_start
+            x1 = x0 + self._window
         else:
+            # 停止後は最後の値が右端に来るように表示する
             x1 = max(t_last, self._window)
             x0 = x1 - self._window
         key = (self._mode, d.count, x0, x1)
