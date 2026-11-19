@@ -55,6 +55,17 @@ COLORS: dict[str, str] = {
     "graph_axis": "#656255",  # 軸の数値（描画領域の外、明るいパネル上）
     "current_line": "#D57835",
     "voltage_line": "#8CC27A",  # 緑（萌黄系）
+    # 液晶パネル（測定値とグラフ。SDL_DischargeLogger の液晶スタイルにならう）
+    "lcd_bezel": "#2A2D30",  # 液晶のまわりの縁
+    "lcd_bg": "#050505",  # 液晶・グラフの背景
+    "lcd_rule": "#E8892B",  # 液晶内の区切り線
+    "lcd_label": "#D0D0D0",  # 液晶内の項目名
+    "lcd_white": "#FFFFFF",  # 電力・積算・経過時間
+    "lcd_value": "#FFE14A",  # 「● 測定中」、選択中の切り替えボタンの文字
+    "lcd_dim": "#5A5A5A",  # 未取得の値（---）
+    "lcd_tick": "#BDBDBD",  # グラフの目盛りの数字
+    "lcd_grid": "#262626",  # グラフのグリッド
+    "lcd_frame": "#3A3A3A",  # グラフの外枠、選択中の切り替えボタンの背景
 }
 
 CURRENT_LINE_WIDTH = 2.0

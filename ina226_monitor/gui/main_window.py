@@ -56,8 +56,9 @@ from ..settings import Settings
 from ..storage import MeasurementInfo, SaveError, build_note, build_title, save_measurement
 from ..zero_cal import ZeroCalError, ZeroCalFailure, collect_samples, compute_offset, format_offset
 from ..theme import app_icon, mono_font, ui_font
-from .plot_panel import DEFAULT_RANGE, MODE_COMBINED, PlotPanel
-from .widgets import FitLabel, SaveOptionsDialog, divider, sub_label
+from .lcd_panel import STATE_DONE, STATE_IDLE, STATE_LIVE, LcdPanel
+from .plot_panel import DEFAULT_RANGE, MODE_COMBINED
+from .widgets import SaveOptionsDialog, divider, sub_label
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ class MainWindow(QMainWindow):
         self.started_at: datetime | None = None
         self.ended_at: datetime | None = None
         self.unsaved = False
+        self._saved_base: str | None = None  # 保存した基名（液晶パネルの「保存済み」表示用）
         self.manual_name = False
         self.busy = False  # ゼロ点補正・保存の実行中
         self._device = ""
@@ -156,8 +158,12 @@ class MainWindow(QMainWindow):
         body.addWidget(self._build_left())  # 幅固定
         right = QVBoxLayout()
         right.setSpacing(12)
-        self.plot = PlotPanel()
-        right.addWidget(self.plot, 1)
+        # 測定値とグラフは黒い液晶パネルにまとめる（SDL_DischargeLogger にならう）
+        self.lcd = LcdPanel()
+        self.plot = self.lcd.plot
+        for name in ("current_label", "voltage_label", "power_label", "mah_label", "elapsed_label"):
+            setattr(self, name, getattr(self.lcd, name))
+        right.addWidget(self.lcd, 1)
         actions = QHBoxLayout()
         actions.setSpacing(10)
         actions.addStretch(1)
@@ -216,6 +222,9 @@ class MainWindow(QMainWindow):
         for ms in INTERVAL_CHOICES_MS:
             self.interval_combo.addItem(interval_label(ms), ms)
         lay.addWidget(self.interval_combo)
+        self.interval_combo.currentIndexChanged.connect(
+            lambda _i: self._update_lcd_info() if hasattr(self, "lcd") else None
+        )
         lay.addSpacing(6)
         port_label = QLabel("ポート")
         port_label.setObjectName("portLabel")
@@ -241,54 +250,6 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(8)
-
-        # 電流（見出しと経過時間）
-        row = QHBoxLayout()
-        heading = QLabel("電流")
-        heading.setFont(ui_font(13, bold=True))
-        row.addWidget(heading)
-        row.addStretch(1)
-        self.elapsed_label = QLabel()
-        self.elapsed_label.setProperty("role", "sub")
-        self.elapsed_label.setFont(mono_font(13))
-        row.addWidget(self.elapsed_label)
-        lay.addLayout(row)
-
-        # 電流の数値バッジ
-        badge = QFrame()
-        badge.setObjectName("currentBadge")
-        bl = QHBoxLayout(badge)
-        bl.setContentsMargins(14, 4, 14, 4)
-        bl.setSpacing(8)
-        self.current_label = FitLabel(mono_font(46, bold=True), min_px=24)
-        bl.addWidget(self.current_label, 1)
-        unit = QLabel("mA")
-        unit.setFont(ui_font(20, bold=True))
-        bl.addWidget(unit, 0, Qt.AlignBottom)
-        lay.addWidget(badge)
-
-        # 電圧・電力・積算
-        grid = QFrame()
-        grid.setObjectName("valueGrid")
-        gl = QHBoxLayout(grid)
-        gl.setContentsMargins(0, 0, 0, 0)
-        gl.setSpacing(0)
-        cells = []
-        for i, title in enumerate(("電圧 V", "電力 mW", "積算 mAh")):
-            cell = QFrame()
-            cell.setObjectName("valueCell")
-            cell.setProperty("divider", i < 2)
-            cl = QVBoxLayout(cell)
-            cl.setContentsMargins(10, 6, 8, 6)
-            cl.setSpacing(0)
-            cl.addWidget(sub_label(title, 12))
-            value = FitLabel(mono_font(18, bold=True), min_px=11)
-            value.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            cl.addWidget(value)
-            gl.addWidget(cell, 1)
-            cells.append(value)
-        self.voltage_label, self.power_label, self.mah_label = cells
-        lay.addWidget(grid)
 
         # ゼロ点補正（リセットは右クリックメニュー）
         row = QHBoxLayout()
@@ -343,8 +304,8 @@ class MainWindow(QMainWindow):
         self.memo_edit = QPlainTextEdit()
         self.memo_edit.setFont(ui_font(14))
         line_h = QFontMetrics(self.memo_edit.font()).lineSpacing()
-        self.memo_edit.setFixedHeight(line_h * 2 + 18)  # 2 行
-        lay.addWidget(self.memo_edit)
+        self.memo_edit.setMinimumHeight(line_h * 2 + 18)  # 2 行以上。測定値を液晶パネルに移した分、残りの高さを使う
+        lay.addWidget(self.memo_edit, 1)
 
         # 出力ファイル名（F-08）
         lay.addWidget(sub_label("出力ファイル名 <span style='font-size:11px'>（.csv / .png / .txt）</span>"))
@@ -354,6 +315,7 @@ class MainWindow(QMainWindow):
         self.name_edit.setFont(mono_font(12))
         self.name_edit.setFixedHeight(32)
         self.name_edit.textEdited.connect(self._on_name_edited)
+        self.name_edit.textChanged.connect(lambda _t: self._update_lcd_info() if hasattr(self, "lcd") else None)
         self.auto_name_button = QPushButton("自動生成")
         self.auto_name_button.setFont(ui_font(12))
         self.auto_name_button.setFixedHeight(32)
@@ -361,7 +323,6 @@ class MainWindow(QMainWindow):
         row.addWidget(self.name_edit, 1)
         row.addWidget(self.auto_name_button)
         lay.addLayout(row)
-        lay.addStretch(1)
 
         scroll = QScrollArea()
         scroll.setObjectName("leftScroll")
@@ -406,20 +367,44 @@ class MainWindow(QMainWindow):
         self.interval_combo.setEnabled(idle_like)
         self.refresh_button.setEnabled(idle_like)
         self.measuring_badge.setVisible(self.state is State.MEASURING)
+        self._update_lcd_info()
+
+    def _update_lcd_info(self) -> None:
+        """液晶パネルの状態の行（状態・周期・保存先のファイル名）。"""
+        if self.state is State.MEASURING:
+            self.lcd.set_state("● 測定中", STATE_LIVE)
+        elif self.state is State.STOPPED:
+            self.lcd.set_state("停止（未保存）" if self.unsaved else "停止", STATE_DONE)
+        else:
+            self.lcd.set_state("未測定", STATE_IDLE)
+        if self.state is State.IDLE or (self.state is State.STOPPED and self.data is None):
+            ms = self.interval_combo.currentData()
+            self.lcd.set_interval_text(f"周期 {ms} ms")
+        else:
+            ms, avg = self._effective_interval()
+            if ms is None:
+                self.lcd.set_interval_text("周期 不明")
+            else:
+                self.lcd.set_interval_text(f"周期 {ms} ms（平均 {avg} 回）" if avg else f"周期 {ms} ms")
+        if self._saved_base:
+            self.lcd.set_file_text(f"保存済み: {self._saved_base}.csv")
+        else:
+            name = sanitize(self.name_edit.text().strip())
+            self.lcd.set_file_text(f"保存予定: {name}.csv" if name else "保存予定: （出力ファイル名を入力）")
 
     def _update_numbers(self) -> None:
         last = self.data.last() if self.data else None
         if last is None:
-            self.current_label.setText("---")
-            for w in (self.voltage_label, self.power_label, self.mah_label):
-                w.setText("---")
-            self.elapsed_label.setText(f"経過 {format_hms(0)}")
+            self.lcd.set_values("--- mA", "--- V", "--- mW", "--- mAh", format_hms(0), dim=True)
             return
-        self.current_label.setText(f"{last['current_mA']:.3f}")
-        self.voltage_label.setText(f"{last['bus_V']:.4f}")
-        self.power_label.setText(f"{last['power_mW']:.3f}")
-        self.mah_label.setText(f"{self.data.mAh:.4f}")
-        self.elapsed_label.setText(f"経過 {format_hms(self.data.last_elapsed_s)}")
+        self.lcd.set_values(
+            f"{last['current_mA']:.3f} mA",
+            f"{last['bus_V']:.4f} V",
+            f"{last['power_mW']:.3f} mW",
+            f"{self.data.mAh:.4f} mAh",
+            format_hms(self.data.last_elapsed_s),
+            dim=False,
+        )
 
     def _update_status(self) -> None:
         if self.state is State.MEASURING:
@@ -433,6 +418,7 @@ class MainWindow(QMainWindow):
         last_write = self.writer.status()[0] if self.writer else None
         t = time.strftime("%H:%M:%S", time.localtime(last_write)) if last_write else "--:--:--"
         self.tmp_label.setText(f"一時保存：{t}")
+        self._update_lcd_info()
 
     def _update_offset_label(self) -> None:
         self.offset_label.setText(f"ゼロ点補正値 {format_offset(self.offset_mA)}")
@@ -531,6 +517,7 @@ class MainWindow(QMainWindow):
             self._auto_name()
         self.data = MeasurementData(self.offset_mA)
         self.unsaved = False
+        self._saved_base = None
         info = self._info()
         self.writer = RecoveryWriter(
             self.paths.recovery_dir,
@@ -762,6 +749,7 @@ class MainWindow(QMainWindow):
 
         self._discard_tmp()
         self.unsaved = False
+        self._saved_base = result.base
         msg = f"保存しました：{result.folder}"
         if result.base != base:
             msg += f"（同名のファイルがあったため {result.base} として保存）"

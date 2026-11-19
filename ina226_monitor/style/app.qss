@@ -61,31 +61,6 @@ QScrollArea#leftScroll, QScrollArea#leftScroll > QWidget > QWidget {
     border: none;
 }
 
-/* 電流の数値バッジ */
-QFrame#currentBadge {
-    background: ${current_badge_bg};
-    border: none;
-    border-radius: 6px;
-}
-QFrame#panel QFrame#currentBadge QLabel {
-    color: ${current_badge_text};
-}
-
-/* 電圧・電力・積算の 3 マス */
-QFrame#valueGrid {
-    background: ${input_bg};
-    border: 1px solid ${panel_border};
-    border-radius: 6px;
-}
-QFrame#valueCell {
-    background: transparent;
-    border: none;
-    padding: 4px 8px;
-}
-QFrame#valueCell[divider="true"] {
-    border-right: 1px solid ${panel_border};
-}
-
 /* ---------------- 入力欄 ---------------- */
 QLineEdit, QPlainTextEdit {
     background: ${input_bg};
@@ -280,4 +255,64 @@ QMenu::item:selected {
 }
 QMenu::item:disabled {
     color: ${text_dis};
+}
+
+/* ---------------- 液晶パネル（測定値とグラフ。SDL_DischargeLogger にならう） ---------------- */
+QFrame#lcdBezel {
+    background: ${lcd_bezel};
+    border: none;
+    border-radius: 10px;
+}
+QFrame#lcd {
+    background: ${lcd_bg};
+    border: none;
+    border-radius: 4px;
+}
+QFrame#lcd QLabel {
+    background: transparent;
+    color: ${lcd_label};
+}
+QFrame#lcdRule {
+    background: ${lcd_rule};
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+QLabel#lcdState[kind="idle"] { color: ${lcd_label}; }
+QLabel#lcdState[kind="live"] { color: ${lcd_value}; }
+QLabel#lcdState[kind="done"] { color: ${lcd_white}; }
+QFrame#lcd QLabel#lcdCurrent { color: ${current_line}; }
+QFrame#lcd QLabel#lcdVoltage { color: ${voltage_line}; }
+QFrame#lcd QLabel#lcdPower, QFrame#lcd QLabel#lcdMah, QFrame#lcd QLabel#lcdElapsed { color: ${lcd_white}; }
+QFrame#lcd QLabel[dim="true"] { color: ${lcd_dim}; }
+QFrame#lcd QLabel#currentAxisLabel { color: ${current_line}; }
+QFrame#lcd QLabel#voltageAxisLabel { color: ${voltage_line}; }
+
+/* 液晶の上の切り替えボタン：暗い地、選択中は灰色の地に黄色の文字 */
+QFrame#lcd QFrame#rangeGroup {
+    background: ${lcd_bg};
+    border: 1px solid ${lcd_frame};
+    border-radius: 6px;
+}
+QFrame#lcd QFrame#rangeGroup QPushButton {
+    background: ${lcd_bg};
+    color: ${lcd_label};
+    border: none;
+    min-height: 24px;
+    padding: 0 10px;
+}
+QFrame#lcd QFrame#rangeGroup QPushButton:hover {
+    color: ${lcd_white};
+}
+QFrame#lcd QFrame#rangeGroup QPushButton[pos="first"] {
+    border-top-left-radius: 5px;
+    border-bottom-left-radius: 5px;
+}
+QFrame#lcd QFrame#rangeGroup QPushButton[pos="last"] {
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+}
+QFrame#lcd QFrame#rangeGroup QPushButton:checked {
+    background: ${lcd_frame};
+    color: ${lcd_value};
 }

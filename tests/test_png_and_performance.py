@@ -142,3 +142,30 @@ def test_png_combined_mode(qapp):
     # 右側（電流の軸）に数値が描かれている＝右の余白が背景色だけではない
     right_margin = [img.pixelColor(x, y).name() for x in range(1480, 1560) for y in range(100, 780, 10)]
     assert len(set(right_margin)) > 1
+
+
+def test_nice_axis_and_time_ticks():
+    from ina226_monitor.axes import (
+        format_time_tick,
+        format_y_ticks,
+        full_time_range,
+        nice_axis,
+        time_ticks,
+        time_unit,
+    )
+
+    assert nice_axis(20.0, 59.0) == (0.0, 80.0, [0.0, 20.0, 40.0, 60.0, 80.0])  # 59 は 60 に近いので 1 目盛り足す
+    assert nice_axis(3.6, 3.7) == (0.0, 4.0, [0.0, 1.0, 2.0, 3.0, 4.0])
+    lo, hi, ticks = nice_axis(-0.125, -0.094)  # 無負荷でマイナス
+    assert lo < -0.125 and hi == 0.0 and format_y_ticks(ticks)[0] == "-0.150"
+    assert nice_axis(0.0, 0.0)[:2] == (0.0, 1.0)
+    assert nice_axis(0.0, 3.7, divisions=2)[2] == [0.0, 2.0, 4.0]  # 低いグラフは区切りを減らす
+    # 横軸
+    assert full_time_range(10.0, live=True) == (0.0, 60.0, 10.0)  # 最低 1 分を先取り
+    assert full_time_range(100.0, live=True) == (0.0, 120.0, 15.0)  # 1.2 倍
+    assert full_time_range(100.0, live=False) == (0.0, 105.0, 15.0)  # 停止後は 5% だけ
+    assert full_time_range(3 * 3600, live=False)[2] == 1800.0
+    values, step = time_ticks(45.0, 55.0, 2.0)
+    assert values == [46.0, 48.0, 50.0, 52.0, 54.0]
+    assert format_time_tick(90.0, 15.0) == "1:30" and time_unit(15.0) == "分"
+    assert format_time_tick(5400.0, 1800.0) == "1:30" and time_unit(1800.0) == "h"

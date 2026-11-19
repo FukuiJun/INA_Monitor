@@ -227,7 +227,7 @@ def test_theme_stylesheet_and_icon(qapp):
     assert "$" not in qss
     for url in re.findall(r"url\(([^)]+)\)", qss):
         assert Path(url).is_file(), url
-    assert "#A3282C" in qss and "rgba(213, 120, 53, 102)" in qss  # 開始ボタンの無効時 = 40%
+    assert "#050505" in qss and "rgba(213, 120, 53, 102)" in qss  # 液晶の背景、開始ボタンの無効時 = 40%
     icon = QIcon(str(resource_path(APP_ICON)))
     assert not icon.isNull()
     assert (256, 256) in [(s.width(), s.height()) for s in icon.availableSizes()]
@@ -327,7 +327,8 @@ def test_y_axis_starts_at_zero_and_combined_mode(window, qapp, tmp_path):
     assert len(w.plot.c_comb_cur.xData) > 0 and len(w.plot.c_comb_vol.xData) > 0
     assert w.plot.p_comb.getViewBox().viewRange()[1][1] > 3.7  # 左軸は電圧
     assert w.plot.vb_comb_cur.viewRange()[1][1] > 59  # 右軸は電流
-    assert w.plot.vb_comb_cur.viewRange()[0] == w.plot.p_comb.getViewBox().viewRange()[0]  # 横軸は共通
+    # 横軸は共通（2 つの ViewBox の大きさの丸めで 0.5 px ほどずれることがある）
+    assert w.plot.vb_comb_cur.viewRange()[0] == pytest.approx(w.plot.p_comb.getViewBox().viewRange()[0], rel=5e-3)
     assert w.plot.vb_comb_cur.zValue() > w.plot.p_comb.zValue()  # 電流の線が背景に隠れない
 
     # 表示モードは次回も使う
@@ -455,3 +456,63 @@ def test_no_ack_message_depends_on_banner(window):
     w.interval_requested = 50
     w._on_interval_no_ack()
     assert w.msg_label.text() == "x"
+
+
+def test_lcd_panel_values_and_state(window, qapp):
+    """液晶パネル：測定値は単位付き、値が無いときは ---、状態の行に測定中・周期・保存予定を出す。"""
+    from ina226_monitor.gui.lcd_panel import STATE_DONE, STATE_IDLE, STATE_LIVE
+
+    w = window
+    assert w.current_label.text() == "--- mA" and w.current_label.property("dim") is True
+    assert w.lcd.state_label.property("kind") == STATE_IDLE
+    assert w.lcd.file_label.toolTip().startswith("保存予定: ")
+    select(w, "MOCK1")
+    w.on_start()
+    wait(qapp, 0.6)
+    assert w.lcd.state_label.text() == "● 測定中" and w.lcd.state_label.property("kind") == STATE_LIVE
+    assert w.current_label.text().endswith(" mA") and w.current_label.property("dim") is False
+    assert w.voltage_label.text().endswith(" V")
+    assert "周期 50 ms" in w.lcd.interval_label.text()
+    assert w.lcd.file_label.toolTip() == f"保存予定: {w.name_edit.text()}.csv"
+    w.on_stop()
+    assert w.lcd.state_label.property("kind") == STATE_DONE
+    assert w.on_save()
+    assert w.lcd.file_label.toolTip().startswith("保存済み: ")
+
+
+def test_graph_axes_lcd_style(qapp):
+    """縦軸は区切りのよい範囲、測定中は縮めない。横軸の最後の目盛りに単位、「全体」は 1.2 倍まで先取り。"""
+    from ina226_monitor.gui.plot_panel import PlotPanel
+    from ina226_monitor.measurement import MeasurementData
+
+    p = PlotPanel()
+    p.resize(900, 600)
+    p.show()
+    d = MeasurementData()
+    p.set_data(d, live=True)
+    p.set_window(None)
+    for i in range(400):  # 20 秒・最大 150 mA
+        d.add(i * 50, 3.7, 150.0 if i == 100 else 20.0, i * 0.05)
+    p.refresh()
+    qapp.processEvents()
+    assert p.p_cur.getViewBox().viewRange()[1] == pytest.approx([0.0, 200.0])
+    assert p.p_cur.getViewBox().viewRange()[0] == pytest.approx([0.0, 60.0])  # 最低 1 分を先取り
+    ticks = p.p_vol.getAxis("bottom")._tickLevels[0]
+    assert ticks[0] == (0.0, "0:00") and ticks[-1][1].endswith(" 分")
+
+    # 測定中は、ページが変わって大きな値が見えなくなっても縦軸を縮めない
+    p.set_window(10.0)  # 20 秒の時点 → 15〜25 秒（時間幅を変えたので縦軸はいったん詰め直す）
+    p.refresh()
+    assert p.p_cur.getViewBox().viewRange()[1][1] == pytest.approx(25.0)
+    for i in range(400, 460):
+        d.add(i * 50, 3.7, 150.0 if i == 450 else 20.0, i * 0.05)  # 22.5 秒に 150 mA
+    p.refresh()
+    assert p.p_cur.getViewBox().viewRange()[1][1] == pytest.approx(200.0)
+    for i in range(460, 1000):  # 次のページ（25〜35 秒…）には大きな値が無い
+        d.add(i * 50, 3.7, 20.0, i * 0.05)
+    p.refresh()
+    assert p.p_cur.getViewBox().viewRange()[0][0] >= 25.0
+    assert p.p_cur.getViewBox().viewRange()[1][1] == pytest.approx(200.0)
+    p.set_live(False)  # 停止後は見えているデータに合わせて詰め直す
+    p.set_window(10.0)
+    assert p.p_cur.getViewBox().viewRange()[1][1] == pytest.approx(25.0)
