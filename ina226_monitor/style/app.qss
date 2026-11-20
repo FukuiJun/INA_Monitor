@@ -284,7 +284,10 @@ QLabel#lcdState[kind="done"] { color: ${lcd_white}; }
 QFrame#lcd QLabel#lcdCurrent { color: ${current_line}; }
 QFrame#lcd QLabel#lcdVoltage { color: ${voltage_line}; }
 QFrame#lcd QLabel#lcdPower, QFrame#lcd QLabel#lcdMah, QFrame#lcd QLabel#lcdElapsed { color: ${lcd_white}; }
-QFrame#lcd QLabel[dim="true"] { color: ${lcd_dim}; }
+/* 値が無いとき（---）は灰色。項目ごとの色より優先させるため、項目名も並べて書く */
+QFrame#lcd QLabel#lcdCurrent[dim="true"], QFrame#lcd QLabel#lcdVoltage[dim="true"],
+QFrame#lcd QLabel#lcdPower[dim="true"], QFrame#lcd QLabel#lcdMah[dim="true"],
+QFrame#lcd QLabel#lcdElapsed[dim="true"] { color: ${lcd_dim}; }
 QFrame#lcd QLabel#currentAxisLabel { color: ${current_line}; }
 QFrame#lcd QLabel#voltageAxisLabel { color: ${voltage_line}; }
 

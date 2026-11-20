@@ -167,7 +167,7 @@ def test_preload_8h(window, qapp, tmp_path):
     w = window
     w.load_mock_preload(576_000)
     t0 = time.perf_counter()
-    for sec in (10.0, 60.0, 300.0, None):
+    for sec in (5.0, 30.0, 300.0, 1800.0, 10800.0, None):
         w.plot.set_window(sec)
         qapp.processEvents()
     w.plot.p_cur.getViewBox().setXRange(1000, 2000)
@@ -348,7 +348,7 @@ def test_live_paging_and_centering(qapp):
     p = PlotPanel()
     d = MeasurementData()
     p.set_data(d, live=True)
-    p.set_window(10.0)
+    p.set_window(5.0)
     t = {"i": 0}
 
     def run_to(seconds):
@@ -358,24 +358,24 @@ def test_live_paging_and_centering(qapp):
         p.refresh()
         return tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0])
 
-    assert run_to(9.9) == (0.0, 10.0)
-    assert run_to(10.05) == (10.0, 20.0)  # 右端に着いたら次のページ（左端から）
-    assert run_to(19.95) == (10.0, 20.0)
-    assert run_to(25.0) == (20.0, 30.0)
+    assert run_to(4.9) == (0.0, 5.0)
+    assert run_to(5.05) == (5.0, 10.0)  # 右端に着いたら次のページ（左端から）
+    assert run_to(9.95) == (5.0, 10.0)
+    assert run_to(12.5) == (10.0, 15.0)
 
-    p.set_window(10.0)  # 同じ幅を選び直しても中央から
-    assert tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0]) == (20.0, 30.0)
-    p.set_window(60.0)  # 25 s で 60 秒幅 → 中央は 30 s だが 0 より前は出さない
-    assert tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0]) == (0.0, 60.0)
-    assert run_to(40.0) == (0.0, 60.0)
-    p.set_window(10.0)  # 40 s で 10 秒幅 → 35〜45 s（最新が中央）
-    assert tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0]) == (35.0, 45.0)
-    assert run_to(45.05) == (45.0, 55.0)
+    p.set_window(5.0)  # 同じ幅を選び直しても中央から
+    assert tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0]) == (10.0, 15.0)
+    p.set_window(30.0)  # 12.5 s で 30 秒幅 → 中央は 15 s だが 0 より前は出さない
+    assert tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0]) == (0.0, 30.0)
+    assert run_to(20.0) == (0.0, 30.0)
+    p.set_window(5.0)  # 20 s で 5 秒幅 → 17.5〜22.5 s（最新が中央）
+    assert tuple(round(v, 6) for v in p.p_cur.getViewBox().viewRange()[0]) == (17.5, 22.5)
+    assert run_to(22.55) == (22.5, 27.5)
 
     p.set_live(False)  # 停止後は最後の値が右端
-    p.set_window(10.0)
+    p.set_window(5.0)
     lo, hi = p.p_cur.getViewBox().viewRange()[0]
-    assert hi == pytest.approx(d.last_elapsed_s) and hi - lo == pytest.approx(10.0)
+    assert hi == pytest.approx(d.last_elapsed_s) and hi - lo == pytest.approx(5.0)
 
 
 def test_tick_font_is_larger(qapp):
@@ -463,7 +463,13 @@ def test_lcd_panel_values_and_state(window, qapp):
     from ina226_monitor.gui.lcd_panel import STATE_DONE, STATE_IDLE, STATE_LIVE
 
     w = window
+    from ina226_monitor.theme import COLORS
+
+    def color(label):
+        return label.palette().color(label.foregroundRole()).name().upper()
+
     assert w.current_label.text() == "--- mA" and w.current_label.property("dim") is True
+    assert color(w.current_label) == COLORS["lcd_dim"].upper()  # 値が無いときは灰色
     assert w.lcd.state_label.property("kind") == STATE_IDLE
     assert w.lcd.file_label.toolTip().startswith("保存予定: ")
     select(w, "MOCK1")
@@ -471,6 +477,7 @@ def test_lcd_panel_values_and_state(window, qapp):
     wait(qapp, 0.6)
     assert w.lcd.state_label.text() == "● 測定中" and w.lcd.state_label.property("kind") == STATE_LIVE
     assert w.current_label.text().endswith(" mA") and w.current_label.property("dim") is False
+    assert color(w.current_label) == COLORS["current_line"].upper()
     assert w.voltage_label.text().endswith(" V")
     assert "周期 50 ms" in w.lcd.interval_label.text()
     assert w.lcd.file_label.toolTip() == f"保存予定: {w.name_edit.text()}.csv"
@@ -501,18 +508,41 @@ def test_graph_axes_lcd_style(qapp):
     assert ticks[0] == (0.0, "0:00") and ticks[-1][1].endswith(" 分")
 
     # 測定中は、ページが変わって大きな値が見えなくなっても縦軸を縮めない
-    p.set_window(10.0)  # 20 秒の時点 → 15〜25 秒（時間幅を変えたので縦軸はいったん詰め直す）
+    p.set_window(5.0)  # 20 秒の時点 → 17.5〜22.5 秒（時間幅を変えたので縦軸はいったん詰め直す）
     p.refresh()
     assert p.p_cur.getViewBox().viewRange()[1][1] == pytest.approx(25.0)
     for i in range(400, 460):
-        d.add(i * 50, 3.7, 150.0 if i == 450 else 20.0, i * 0.05)  # 22.5 秒に 150 mA
+        d.add(i * 50, 3.7, 150.0 if i == 452 else 20.0, i * 0.05)  # 22.6 秒に 150 mA（次のページ 22.5〜27.5 秒）
     p.refresh()
     assert p.p_cur.getViewBox().viewRange()[1][1] == pytest.approx(200.0)
-    for i in range(460, 1000):  # 次のページ（25〜35 秒…）には大きな値が無い
+    for i in range(460, 1000):  # その次のページ（27.5 秒〜）には大きな値が無い
         d.add(i * 50, 3.7, 20.0, i * 0.05)
     p.refresh()
-    assert p.p_cur.getViewBox().viewRange()[0][0] >= 25.0
+    assert p.p_cur.getViewBox().viewRange()[0][0] >= 27.5
     assert p.p_cur.getViewBox().viewRange()[1][1] == pytest.approx(200.0)
     p.set_live(False)  # 停止後は見えているデータに合わせて詰め直す
-    p.set_window(10.0)
+    p.set_window(5.0)
     assert p.p_cur.getViewBox().viewRange()[1][1] == pytest.approx(25.0)
+
+
+def test_range_choices(qapp):
+    """表示範囲は 5秒・30秒・5分・30分・3時間・全体。長い時間幅の目盛りは h:mm。"""
+    from ina226_monitor.gui.plot_panel import RANGES, PlotPanel
+    from ina226_monitor.measurement import MeasurementData
+
+    assert [label for label, _ in RANGES] == ["5秒", "30秒", "5分", "30分", "3時間", "全体"]
+    assert [sec for _, sec in RANGES] == [5.0, 30.0, 300.0, 1800.0, 10800.0, None]
+    p = PlotPanel()
+    d = MeasurementData()
+    p.set_data(d, live=True)
+    p.set_window(10800.0)
+    d.add(0, 3.7, 10.0, 0.0)
+    d.add(50, 3.7, 10.0, 0.05)
+    p.refresh()
+    assert p.p_cur.getViewBox().viewRange()[0] == pytest.approx([0.0, 10800.0])
+    ticks = p.p_vol.getAxis("bottom")._tickLevels[0]
+    assert ticks[0][1] == "0:00" and ticks[-1] == (10800.0, "3:00 h")
+    p.set_window(5.0)
+    p.refresh()
+    ticks = p.p_vol.getAxis("bottom")._tickLevels[0]
+    assert ticks[-1][1].endswith(" 分")  # 5 秒幅は m:ss

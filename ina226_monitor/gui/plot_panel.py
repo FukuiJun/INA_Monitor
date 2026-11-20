@@ -4,7 +4,7 @@
 - 縦軸：下端 0（マイナスがあれば下の区切り）、上端は区切りのよい値。測定中は広げる方向にだけ変える
 - 横軸：区切りのよい時間の目盛り（m:ss または h:mm）。最後の目盛りに単位（分／h）を付ける
   - 「全体」：測定中は経過時間の 1.2 倍まで先に取る（軸が頻繁に変わらない）。停止後は測定時間に合わせる
-  - 10／60／300 秒：測定中はページ送り（右端に着いたら次の時間幅を左端から）。時間幅を変えたら最新の値を中央に
+  - 5 秒〜3 時間：測定中はページ送り（右端に着いたら次の時間幅を左端から）。時間幅を変えたら最新の値を中央に
 - 表示モード：2 段（上に電流 mA・下に電圧 V）と、重ねる（左軸 電圧・右軸 電流）
 """
 
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -30,7 +31,14 @@ from ..decimate import minmax_decimate, visible_slice
 from ..measurement import MeasurementData
 from ..theme import COLORS, CURRENT_LINE_WIDTH, VOLTAGE_LINE_WIDTH, mono_font, ui_font
 
-RANGES = [("10秒", 10.0), ("60秒", 60.0), ("300秒", 300.0), ("全体", None)]
+RANGES = [  # 表示範囲の切り替え（ラベル, 時間幅［秒］。None は全体）
+    ("5秒", 5.0),
+    ("30秒", 30.0),
+    ("5分", 300.0),
+    ("30分", 1800.0),
+    ("3時間", 10800.0),
+    ("全体", None),
+]
 DEFAULT_RANGE = None  # 初期表示は「全体」
 MAX_DRAW_POINTS = 4000
 LEFT_AXIS_WIDTH = 62  # 縦軸の数値欄の幅の初期値（描画のたびに数値に合わせて詰める）
@@ -122,6 +130,7 @@ def _segmented(items, font_px: int = 13) -> tuple[QFrame, QButtonGroup, list[QPu
         b = QPushButton(label)
         b.setCheckable(True)
         b.setFont(ui_font(font_px))
+        b.setMinimumWidth(b.sizeHint().width())  # 狭いときもボタンの文字は削らない（見出しのほうを詰める）
         if i == 0:
             b.setProperty("pos", "first")
         elif i == len(items) - 1:
@@ -162,8 +171,9 @@ class PlotPanel(QWidget):
         # 見出しは縦軸の数値欄の右、グラフの描画領域の左端にそろえる
         self.title_label.setContentsMargins(LEFT_AXIS_WIDTH, 0, 0, 0)
         self.title_label.setFont(ui_font(12, bold=True))
-        top.addWidget(self.title_label)
-        top.addStretch(1)
+        self.title_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)  # 狭いときは見出しを詰める
+        self.title_label.setMinimumWidth(0)
+        top.addWidget(self.title_label, 1)
         mode_group, _, mode_buttons = _segmented([label for label, _ in MODES], 12)
         self.mode_buttons: dict[str, QPushButton] = {}
         for b, (_, mode) in zip(mode_buttons, MODES):
@@ -328,9 +338,9 @@ class PlotPanel(QWidget):
         if combined:
             vol, cur = COLORS["voltage_line"], COLORS["current_line"]
             self.title_label.setText(
-                f"<span style='color:{vol}'>電圧 [V]（左軸）</span>"
-                f"<span style='color:{COLORS['lcd_label']}'>　／　</span>"
-                f"<span style='color:{cur}'>電流 [mA]（右軸）</span>"
+                f"<span style='color:{vol}'>電圧 [V] 左軸</span>"
+                f"<span style='color:{COLORS['lcd_label']}'> ／ </span>"
+                f"<span style='color:{cur}'>電流 [mA] 右軸</span>"
             )
         else:
             self.title_label.setText("電流 [mA]")
